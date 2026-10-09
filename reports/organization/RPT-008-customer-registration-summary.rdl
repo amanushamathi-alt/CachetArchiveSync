@@ -1,0 +1,1221 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  RPT-008 — Customer Registration Summary
+  SSRS Report Definition Language (RDL)
+  Spec: coding-agent/specs/web-reports/RPT-008-customer-registration-summary.md
+  Namespace: http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition
+  Repository: reports/organization/RPT-008-customer-registration-summary.rdl
+
+  Page: A4 Landscape (11.69in × 8.27in), 10mm (0.394in) margins, body width = 10.9in
+  Deployment target: SSRS Web Portal → /GTW/GiftCards/RPT-008-Customer-Registration-Summary.rdl
+  Data source: GTW_GiftCards_DS (Windows Integrated Security, ReadOnly, GiftCards DB)
+
+  Role gate (enforced by calling portal before rendering URL):
+    DAWN.usm.role.role_id IN (8=Owner, 9=Supervisor) WHERE role_type_id = 3
+
+  Datasets:
+    dsKPI        → gc.rpt_org_customer_registration_kpi
+    dsActivity   → gc.rpt_org_customer_registration_activity
+    dsDetail     → gc.rpt_org_customer_registration_detail
+    dsOperators  → gc.rpt_org_operators_lst  (shared SP from RPT-001)
+
+  Parameters (P1–P5):
+    organization_id, from_date, to_date, operator_ids (multi), include_incomplete_only
+
+  KPI Row 1 (4 tiles @ 2.725in): New Registrations | Physical Card | Virtual Card | Both Cards
+  KPI Row 2 (3 tiles @ 3.633/3.634in): Phone Verified | ID Verified | PIN Set
+  Part A: 8 columns, flat table, ORGANISATION TOTAL sentinel row (green highlight)
+  Part B: 7 columns, grouped by operator, amber rows = incomplete onboarding
+
+  Layout (direct body children, A4 Landscape, all absolute positions):
+    ReportHeaderBand       : Top=0in,      Height=0.688in
+    TextboxKpiSectionLabel : Top=0.698in,  Height=0.22in
+    TablixKpiRow1          : Top=0.938in,  Height=0.88in
+    TablixKpiRow2          : Top=1.858in,  Height=0.88in
+    TextboxPartASectionLabel : Top=2.778in, Height=0.22in
+    TablixPartA            : Top=3.018in,  Height=1.21in  (grows)
+    TextboxPartBSectionLabel : Top=4.248in, Height=0.22in  (pushed down as PartA grows)
+    TablixPartB            : Top=4.488in   (grows)
+
+  Column widths (Part A, sum = 10.9in):
+    Location 2.910 | New Reg 0.934 | Txns 0.934 | Dep.Count 0.934
+    Dep.Amount 1.400 | W/D Count 0.934 | W/D Amount 1.400 | Avg Balance 1.454
+
+  Column widths (Part B, sum = 10.9in):
+    Reg Date 2.100 | Customer 2.410 | Card Type 1.150 | Phone 1.048
+    ID 1.048 | PIN 1.048 | Initial Load 2.096
+
+  Security: PII minimised — customer_display = first_name + ' ' + last_initial + '.' only.
+            No phone, DOB, PAN, full name, customer_id in any output column.
+            No Vault JOIN. No gc.customer_kyc reference anywhere.
+            ExecutionLog3 auto-audit (SOC 2 CC6.1/CC7.2/CC4.1).
+
+  TraceCounts / GTW Gift Card System — 2026-06-05
+-->
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+
+  <ReportID>RPT-008</ReportID>
+  <Description>Customer Registration Summary — Organisation-level new customer onboarding volume, card type mix, onboarding completeness (phone/ID/PIN) and financial activity per location. Owner and Supervisor access only. No KYC. No PAN. No full name.</Description>
+  <Author>TraceCounts GTW System</Author>
+  <AutoRefresh>0</AutoRefresh>
+
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+
+          <!-- ════════════════════════════════════════════════════════════
+               REPORT HEADER BAND — #1A1A1A background, 0.688in high
+          ════════════════════════════════════════════════════════════════ -->
+          <Rectangle Name="ReportHeaderBand">
+            <Style>
+              <BackgroundColor>#1A1A1A</BackgroundColor>
+            </Style>
+            <Top>0in</Top>
+            <Left>0in</Left>
+            <Width>10.9in</Width>
+            <Height>0.688in</Height>
+            <ReportItems>
+              <Textbox Name="TextboxTitle">
+                <Value>Customer Registration Summary</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>13pt</FontSize>
+                  <FontWeight>Bold</FontWeight>
+                  <Color>#FFFFFF</Color>
+                  <VerticalAlign>Middle</VerticalAlign>
+                </Style>
+                <Top>0.05in</Top>
+                <Left>0.1in</Left>
+                <Width>6.5in</Width>
+                <Height>0.22in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxOrgLine">
+                <Value>=First(Fields!org_name.Value, "dsKPI") &amp; "  ·  Period: " &amp; Format(Parameters!from_date.Value, "MM/dd/yyyy") &amp; " – " &amp; Format(Parameters!to_date.Value, "MM/dd/yyyy") &amp; "  (" &amp; First(Fields!org_windows_timezone_id.Value, "dsKPI") &amp; ")"</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8.5pt</FontSize>
+                  <Color>#AAAAAA</Color>
+                  <VerticalAlign>Middle</VerticalAlign>
+                </Style>
+                <DataSetName>dsKPI</DataSetName>
+                <Top>0.30in</Top>
+                <Left>0.1in</Left>
+                <Width>7.0in</Width>
+                <Height>0.17in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxFiltersLine">
+                <Value>="Operators: " &amp; IIF(Parameters!operator_ids.Count = 0, "All", CStr(Parameters!operator_ids.Count) &amp; " selected") &amp; "  ·  Filter: " &amp; IIF(Parameters!include_incomplete_only.Value, "Incomplete Only", "All Registrations")</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8pt</FontSize>
+                  <Color>#888888</Color>
+                  <VerticalAlign>Middle</VerticalAlign>
+                </Style>
+                <Top>0.48in</Top>
+                <Left>0.1in</Left>
+                <Width>7.0in</Width>
+                <Height>0.16in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxGenerated">
+                <Value>="Generated: " &amp; Format(Globals!ExecutionTime, "MM/dd/yyyy HH:mm") &amp; " UTC"</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8.5pt</FontSize>
+                  <Color>#AAAAAA</Color>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+                <Top>0.05in</Top>
+                <Left>7.2in</Left>
+                <Width>3.6in</Width>
+                <Height>0.16in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxUser">
+                <Value>="By: " &amp; User!UserID</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8.5pt</FontSize>
+                  <Color>#AAAAAA</Color>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+                <Top>0.22in</Top>
+                <Left>7.2in</Left>
+                <Width>3.6in</Width>
+                <Height>0.16in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxReportID">
+                <Value>Report ID: RPT-008  ·  SSRS Web Portal</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8pt</FontSize>
+                  <Color>#888888</Color>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+                <Top>0.39in</Top>
+                <Left>7.2in</Left>
+                <Width>3.6in</Width>
+                <Height>0.14in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+            </ReportItems>
+          </Rectangle>
+
+          <!-- ════════════════════════════════════════════════════════════
+               SECTION LABEL — KPI EXECUTIVE SUMMARY
+          ════════════════════════════════════════════════════════════════ -->
+          <Textbox Name="TextboxKpiSectionLabel">
+            <Value>KPI — EXECUTIVE SUMMARY</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily>
+              <FontSize>8.5pt</FontSize>
+              <FontWeight>Bold</FontWeight>
+              <Color>#1A1A1A</Color>
+              <BackgroundColor>#D6E4F0</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign>
+              <PaddingLeft>10pt</PaddingLeft>
+            </Style>
+            <Top>0.698in</Top>
+            <Left>0in</Left>
+            <Width>7.5in</Width>
+            <Height>0.22in</Height>
+          </Textbox>
+          <Textbox Name="TextboxKpiDatasetLabel">
+            <Value>dsKPI  ·  gc.rpt_org_customer_registration_kpi</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily>
+              <FontSize>7.5pt</FontSize>
+              <Color>#555555</Color>
+              <BackgroundColor>#D6E4F0</BackgroundColor>
+              <TextAlign>Right</TextAlign>
+              <VerticalAlign>Middle</VerticalAlign>
+              <PaddingRight>8pt</PaddingRight>
+            </Style>
+            <Top>0.698in</Top>
+            <Left>7.5in</Left>
+            <Width>3.4in</Width>
+            <Height>0.22in</Height>
+          </Textbox>
+
+          <!-- ════════════════════════════════════════════════════════════
+               KPI ROW 1 — 4 tiles: New Reg | Physical Card | Virtual Card | Both Cards
+               Each tile = 2.725in wide × 0.88in tall
+          ════════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablixKpiRow1">
+            <DataSetName>dsKPI</DataSetName>
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>2.725in</Width></TablixColumn>
+                <TablixColumn><Width>2.725in</Width></TablixColumn>
+                <TablixColumn><Width>2.725in</Width></TablixColumn>
+                <TablixColumn><Width>2.725in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow>
+                  <Height>0.88in</Height>
+                  <TablixCells>
+
+                    <!-- T1: NEW REGISTRATIONS — accent #1A1A1A, count only -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile1">
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile1Accent">
+                              <Style><BackgroundColor>#1A1A1A</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>0.88in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile1Label">
+                              <Value>NEW REGISTRATIONS</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.04in</Top><Left>0.1in</Left>
+                              <Width>2.575in</Width><Height>0.17in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile1Value">
+                              <Value>=Fields!new_registrations_count.Value</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>14pt</FontSize><FontWeight>Bold</FontWeight><Color>#1A1A1A</Color><Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.23in</Top><Left>0.1in</Left>
+                              <Width>2.575in</Width><Height>0.35in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile1Sub">
+                              <Value>New customer accounts created in date range</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#888888</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.62in</Top><Left>0.1in</Left>
+                              <Width>2.575in</Width><Height>0.22in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                    <!-- T2: PHYSICAL CARD — accent #1F3864 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile2">
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile2Accent">
+                              <Style><BackgroundColor>#1F3864</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>0.88in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile2Label">
+                              <Value>PHYSICAL CARD</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.04in</Top><Left>0.1in</Left>
+                              <Width>2.575in</Width><Height>0.17in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile2Value">
+                              <Value>=Fields!physical_card_count.Value</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>14pt</FontSize><FontWeight>Bold</FontWeight><Color>#1F3864</Color><Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.23in</Top><Left>0.1in</Left>
+                              <Width>2.575in</Width><Height>0.28in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile2Pct">
+                              <Value>=IIF(IsNothing(Fields!physical_card_pct.Value), "N/A", Format(CDbl(Fields!physical_card_pct.Value), "0.0") &amp; "% of new registrations")</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#1F3864</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.53in</Top><Left>0.1in</Left>
+                              <Width>2.575in</Width><Height>0.17in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile2Sub">
+                              <Value>use_physical_card = 1</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#888888</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.71in</Top><Left>0.1in</Left>
+                              <Width>2.575in</Width><Height>0.15in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                    <!-- T3: VIRTUAL CARD — accent #375623 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile3">
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile3Accent">
+                              <Style><BackgroundColor>#375623</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>0.88in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile3Label">
+                              <Value>VIRTUAL CARD</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.04in</Top><Left>0.1in</Left>
+                              <Width>2.575in</Width><Height>0.17in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile3Value">
+                              <Value>=Fields!virtual_card_count.Value</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>14pt</FontSize><FontWeight>Bold</FontWeight><Color>#375623</Color><Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.23in</Top><Left>0.1in</Left>
+                              <Width>2.575in</Width><Height>0.28in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile3Pct">
+                              <Value>=IIF(IsNothing(Fields!virtual_card_pct.Value), "N/A", Format(CDbl(Fields!virtual_card_pct.Value), "0.0") &amp; "% of new registrations")</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#375623</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.53in</Top><Left>0.1in</Left>
+                              <Width>2.575in</Width><Height>0.17in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile3Sub">
+                              <Value>use_virtual_card = 1</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#888888</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.71in</Top><Left>0.1in</Left>
+                              <Width>2.575in</Width><Height>0.15in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                    <!-- T4: BOTH CARDS — accent #833C00 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile4">
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile4Accent">
+                              <Style><BackgroundColor>#833C00</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>0.88in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile4Label">
+                              <Value>BOTH CARDS</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.04in</Top><Left>0.1in</Left>
+                              <Width>2.575in</Width><Height>0.17in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile4Value">
+                              <Value>=Fields!both_card_count.Value</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>14pt</FontSize><FontWeight>Bold</FontWeight><Color>#833C00</Color><Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.23in</Top><Left>0.1in</Left>
+                              <Width>2.575in</Width><Height>0.28in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile4Pct">
+                              <Value>=IIF(IsNothing(Fields!both_card_pct.Value), "N/A", Format(CDbl(Fields!both_card_pct.Value), "0.0") &amp; "% of new registrations")</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#833C00</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.53in</Top><Left>0.1in</Left>
+                              <Width>2.575in</Width><Height>0.17in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile4Sub">
+                              <Value>physical = 1 AND virtual = 1</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#888888</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.71in</Top><Left>0.1in</Left>
+                              <Width>2.575in</Width><Height>0.15in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                  </TablixCells>
+                </TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember/><TablixMember/><TablixMember/><TablixMember/>
+              </TablixMembers>
+            </TablixColumnHierarchy>
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <TablixMember>
+                  <DataGroupName>KpiGroup1</DataGroupName>
+                  <Group Name="KpiGroup1"/>
+                </TablixMember>
+              </TablixMembers>
+            </TablixRowHierarchy>
+            <Top>0.938in</Top>
+            <Left>0in</Left>
+            <Width>10.9in</Width>
+            <Height>0.88in</Height>
+          </Tablix>
+
+          <!-- ════════════════════════════════════════════════════════════
+               KPI ROW 2 — 3 tiles: Phone Verified | ID Verified | PIN Set
+               T5/T6: 3.633in wide; T7: 3.634in wide  (sum = 10.9in)
+          ════════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablixKpiRow2">
+            <DataSetName>dsKPI</DataSetName>
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>3.633in</Width></TablixColumn>
+                <TablixColumn><Width>3.633in</Width></TablixColumn>
+                <TablixColumn><Width>3.634in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow>
+                  <Height>0.88in</Height>
+                  <TablixCells>
+
+                    <!-- T5: PHONE VERIFIED — accent #C45911 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile5">
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile5Accent">
+                              <Style><BackgroundColor>#C45911</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>0.88in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile5Label">
+                              <Value>PHONE VERIFIED</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.04in</Top><Left>0.1in</Left>
+                              <Width>3.483in</Width><Height>0.17in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile5Value">
+                              <Value>=Fields!phone_verified_count.Value</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>14pt</FontSize><FontWeight>Bold</FontWeight><Color>#C45911</Color><Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.23in</Top><Left>0.1in</Left>
+                              <Width>3.483in</Width><Height>0.28in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile5Pct">
+                              <Value>=IIF(IsNothing(Fields!phone_verified_pct.Value), "N/A", Format(CDbl(Fields!phone_verified_pct.Value), "0.0") &amp; "% of new registrations")</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#C45911</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.53in</Top><Left>0.1in</Left>
+                              <Width>3.483in</Width><Height>0.17in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile5Sub">
+                              <Value>OTP confirmed via registration cashier session bridge</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#888888</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.71in</Top><Left>0.1in</Left>
+                              <Width>3.483in</Width><Height>0.15in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                    <!-- T6: ID VERIFIED — accent #1F3864 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile6">
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile6Accent">
+                              <Style><BackgroundColor>#1F3864</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>0.88in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile6Label">
+                              <Value>ID VERIFIED</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.04in</Top><Left>0.1in</Left>
+                              <Width>3.483in</Width><Height>0.17in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile6Value">
+                              <Value>=Fields!id_verified_count.Value</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>14pt</FontSize><FontWeight>Bold</FontWeight><Color>#1F3864</Color><Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.23in</Top><Left>0.1in</Left>
+                              <Width>3.483in</Width><Height>0.28in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile6Pct">
+                              <Value>=IIF(IsNothing(Fields!id_verified_pct.Value), "N/A", Format(CDbl(Fields!id_verified_pct.Value), "0.0") &amp; "% of new registrations")</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#1F3864</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.53in</Top><Left>0.1in</Left>
+                              <Width>3.483in</Width><Height>0.17in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile6Sub">
+                              <Value>Active gc.customer_identification record exists</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#888888</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.71in</Top><Left>0.1in</Left>
+                              <Width>3.483in</Width><Height>0.15in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                    <!-- T7: PIN SET — accent #375623 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile7">
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile7Accent">
+                              <Style><BackgroundColor>#375623</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>0.88in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile7Label">
+                              <Value>PIN SET</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.04in</Top><Left>0.1in</Left>
+                              <Width>3.484in</Width><Height>0.17in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile7Value">
+                              <Value>=Fields!pin_set_count.Value</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>14pt</FontSize><FontWeight>Bold</FontWeight><Color>#375623</Color><Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.23in</Top><Left>0.1in</Left>
+                              <Width>3.484in</Width><Height>0.28in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile7Pct">
+                              <Value>=IIF(IsNothing(Fields!pin_set_pct.Value), "N/A", Format(CDbl(Fields!pin_set_pct.Value), "0.0") &amp; "% of new registrations")</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#375623</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.53in</Top><Left>0.1in</Left>
+                              <Width>3.484in</Width><Height>0.17in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile7Sub">
+                              <Value>Active gc.customer_pin_credentials record exists</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#888888</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.71in</Top><Left>0.1in</Left>
+                              <Width>3.484in</Width><Height>0.15in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                  </TablixCells>
+                </TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember/><TablixMember/><TablixMember/>
+              </TablixMembers>
+            </TablixColumnHierarchy>
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <TablixMember>
+                  <DataGroupName>KpiGroup2</DataGroupName>
+                  <Group Name="KpiGroup2"/>
+                </TablixMember>
+              </TablixMembers>
+            </TablixRowHierarchy>
+            <Top>1.858in</Top>
+            <Left>0in</Left>
+            <Width>10.9in</Width>
+            <Height>0.88in</Height>
+          </Tablix>
+
+          <!-- ════════════════════════════════════════════════════════════
+               SECTION LABEL — PART A LOCATION ACTIVITY SUMMARY
+          ════════════════════════════════════════════════════════════════ -->
+          <Textbox Name="TextboxPartASectionLabel">
+            <Value>PART A — LOCATION ACTIVITY SUMMARY</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#1A1A1A</Color>
+              <BackgroundColor>#D6E4F0</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign><PaddingLeft>10pt</PaddingLeft>
+            </Style>
+            <Top>2.778in</Top><Left>0in</Left>
+            <Width>7.5in</Width><Height>0.22in</Height>
+          </Textbox>
+          <Textbox Name="TextboxPartADatasetLabel">
+            <Value>dsActivity  ·  gc.rpt_org_customer_registration_activity</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#555555</Color><BackgroundColor>#D6E4F0</BackgroundColor>
+              <TextAlign>Right</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <PaddingRight>8pt</PaddingRight>
+            </Style>
+            <Top>2.778in</Top><Left>7.5in</Left>
+            <Width>3.4in</Width><Height>0.22in</Height>
+          </Textbox>
+
+          <!-- ════════════════════════════════════════════════════════════
+               PART A — LOCATION ACTIVITY TABLIX
+               8 columns, flat table.
+               ORGANISATION TOTAL row: operator_id = @organization_id (green #C6EFCE, bold).
+               Column widths: 2.910+0.934+0.934+0.934+1.400+0.934+1.400+1.454 = 10.9in
+          ════════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablixPartA">
+            <DataSetName>dsActivity</DataSetName>
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>2.910in</Width></TablixColumn>  <!-- Location -->
+                <TablixColumn><Width>0.934in</Width></TablixColumn>  <!-- New Reg -->
+                <TablixColumn><Width>0.934in</Width></TablixColumn>  <!-- Txns -->
+                <TablixColumn><Width>0.934in</Width></TablixColumn>  <!-- Dep.Count -->
+                <TablixColumn><Width>1.400in</Width></TablixColumn>  <!-- Dep.Amount -->
+                <TablixColumn><Width>0.934in</Width></TablixColumn>  <!-- W/D Count -->
+                <TablixColumn><Width>1.400in</Width></TablixColumn>  <!-- W/D Amount -->
+                <TablixColumn><Width>1.454in</Width></TablixColumn>  <!-- Avg Balance -->
+              </TablixColumns>
+              <TablixRows>
+
+                <!-- ROW 1: Column headers -->
+                <TablixRow>
+                  <Height>0.26in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="PA8_Loc_Hdr"><Value>Location</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PA8_NR_Hdr"><Value>New Reg.</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PA8_Txn_Hdr"><Value>Txns</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PA8_DC_Hdr"><Value>Dep. #</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PA8_DA_Hdr"><Value>Dep. Amount</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PA8_WC_Hdr"><Value>W/D #</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PA8_WA_Hdr"><Value>W/D Amount</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PA8_AB_Hdr"><Value>Avg Balance</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- ROW 2: Detail — ORGANISATION TOTAL row = green + bold; alternating stripes -->
+                <TablixRow>
+                  <Height>0.22in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="PA8_Loc_Det"><Value>=Fields!operator_display_name.Value</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "Bold", "Normal")</FontWeight><Color>#333333</Color><BackgroundColor>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "#C6EFCE", IIF(RowNumber("ActivityDetail") Mod 2 = 0, "#F2F8FE", "#FFFFFF"))</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PA8_NR_Det"><Value>=Fields!new_registrations_count.Value</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "Bold", "Normal")</FontWeight><Color>#333333</Color><Format>#,##0</Format><BackgroundColor>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "#C6EFCE", IIF(RowNumber("ActivityDetail") Mod 2 = 0, "#F2F8FE", "#FFFFFF"))</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PA8_Txn_Det"><Value>=Fields!total_txn_count.Value</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "Bold", "Normal")</FontWeight><Color>#333333</Color><Format>#,##0</Format><BackgroundColor>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "#C6EFCE", IIF(RowNumber("ActivityDetail") Mod 2 = 0, "#F2F8FE", "#FFFFFF"))</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PA8_DC_Det"><Value>=Fields!deposit_count.Value</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "Bold", "Normal")</FontWeight><Color>#333333</Color><Format>#,##0</Format><BackgroundColor>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "#C6EFCE", IIF(RowNumber("ActivityDetail") Mod 2 = 0, "#F2F8FE", "#FFFFFF"))</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PA8_DA_Det"><Value>=Fields!deposit_amount.Value</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "Bold", "Normal")</FontWeight><Color>#333333</Color><Format>$#,##0.00</Format><BackgroundColor>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "#C6EFCE", IIF(RowNumber("ActivityDetail") Mod 2 = 0, "#F2F8FE", "#FFFFFF"))</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PA8_WC_Det"><Value>=Fields!withdrawal_count.Value</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "Bold", "Normal")</FontWeight><Color>#333333</Color><Format>#,##0</Format><BackgroundColor>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "#C6EFCE", IIF(RowNumber("ActivityDetail") Mod 2 = 0, "#F2F8FE", "#FFFFFF"))</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PA8_WA_Det"><Value>=Fields!withdrawal_amount.Value</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "Bold", "Normal")</FontWeight><Color>#333333</Color><Format>$#,##0.00</Format><BackgroundColor>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "#C6EFCE", IIF(RowNumber("ActivityDetail") Mod 2 = 0, "#F2F8FE", "#FFFFFF"))</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PA8_AB_Det"><Value>=Fields!avg_current_balance.Value</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "Bold", "Normal")</FontWeight><Color>#333333</Color><Format>$#,##0.00</Format><BackgroundColor>=IIF(Fields!operator_id.Value = CInt(Parameters!organization_id.Value), "#C6EFCE", IIF(RowNumber("ActivityDetail") Mod 2 = 0, "#F2F8FE", "#FFFFFF"))</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+              </TablixRows>
+            </TablixBody>
+
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember/><TablixMember/><TablixMember/><TablixMember/>
+                <TablixMember/><TablixMember/><TablixMember/><TablixMember/>
+              </TablixMembers>
+            </TablixColumnHierarchy>
+
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <!-- Col header (static, repeat on new pages) -->
+                <TablixMember>
+                  <KeepWithGroup>After</KeepWithGroup>
+                  <RepeatOnNewPage>true</RepeatOnNewPage>
+                  <FixedData>true</FixedData>
+                </TablixMember>
+                <!-- Detail rows — one per operator + ORGANISATION TOTAL -->
+                <TablixMember>
+                  <Group Name="ActivityDetail">
+                    <DataGroupName>ActivityDetail</DataGroupName>
+                  </Group>
+                </TablixMember>
+              </TablixMembers>
+            </TablixRowHierarchy>
+
+            <Top>3.018in</Top>
+            <Left>0in</Left>
+            <Width>10.9in</Width>
+            <Height>1.21in</Height>
+          </Tablix>
+
+          <!-- ════════════════════════════════════════════════════════════
+               SECTION LABEL — PART B CUSTOMER REGISTRATION DETAIL
+               Positioned immediately below TablixPartA declared bottom
+               (pushed down by SSRS as TablixPartA grows)
+          ════════════════════════════════════════════════════════════════ -->
+          <Textbox Name="TextboxPartBSectionLabel">
+            <Value>PART B — CUSTOMER REGISTRATION DETAIL</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#1A1A1A</Color>
+              <BackgroundColor>#D6E4F0</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign><PaddingLeft>10pt</PaddingLeft>
+            </Style>
+            <Top>4.248in</Top><Left>0in</Left>
+            <Width>7.5in</Width><Height>0.22in</Height>
+          </Textbox>
+          <Textbox Name="TextboxPartBDatasetLabel">
+            <Value>=IIF(Parameters!include_incomplete_only.Value, "dsDetail  ·  gc.rpt_org_customer_registration_detail  ·  Incomplete Only", "dsDetail  ·  gc.rpt_org_customer_registration_detail")</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#555555</Color><BackgroundColor>#D6E4F0</BackgroundColor>
+              <TextAlign>Right</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <PaddingRight>8pt</PaddingRight>
+            </Style>
+            <Top>4.248in</Top><Left>7.5in</Left>
+            <Width>3.4in</Width><Height>0.22in</Height>
+          </Textbox>
+
+          <!-- ════════════════════════════════════════════════════════════
+               PART B — CUSTOMER REGISTRATION DETAIL TABLIX
+               7 columns, grouped by operator_display_name.
+               Amber row (#FFF2CC) = NOT (phone=1 AND id=1 AND pin=1) — incomplete onboarding.
+               BIT columns (phone/id/pin): Y=#375623 Bold, N=#C00000 Bold.
+               Column widths: 2.100+2.410+1.150+1.048+1.048+1.048+2.096 = 10.9in
+          ════════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablixPartB">
+            <DataSetName>dsDetail</DataSetName>
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>2.100in</Width></TablixColumn>  <!-- Reg Date -->
+                <TablixColumn><Width>2.410in</Width></TablixColumn>  <!-- Customer -->
+                <TablixColumn><Width>1.150in</Width></TablixColumn>  <!-- Card Type -->
+                <TablixColumn><Width>1.048in</Width></TablixColumn>  <!-- Phone -->
+                <TablixColumn><Width>1.048in</Width></TablixColumn>  <!-- ID -->
+                <TablixColumn><Width>1.048in</Width></TablixColumn>  <!-- PIN -->
+                <TablixColumn><Width>2.096in</Width></TablixColumn>  <!-- Initial Load -->
+              </TablixColumns>
+              <TablixRows>
+
+                <!-- ROW 1: Column headers -->
+                <TablixRow>
+                  <Height>0.26in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="PB7_RD_Hdr"><Value>Reg. Date (Local)</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_Cu_Hdr"><Value>Customer</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_CT_Hdr"><Value>Card Type</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_Ph_Hdr"><Value>Phone</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_ID_Hdr"><Value>ID</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_PN_Hdr"><Value>PIN</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_IL_Hdr"><Value>Initial Load</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- ROW 2: Operator group header -->
+                <TablixRow>
+                  <Height>0.25in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="PB7_Op_GH"><Value>=First(Fields!operator_display_name.Value, "OperatorGroupB")</Value><Style><FontFamily>Calibri</FontFamily><FontSize>10pt</FontSize><FontWeight>Bold</FontWeight><Color>#1A1A1A</Color><BackgroundColor>#D6E4F0</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_Cu_GH"><Value>=""</Value><Style><BackgroundColor>#D6E4F0</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_CT_GH"><Value>=""</Value><Style><BackgroundColor>#D6E4F0</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_Ph_GH"><Value>=""</Value><Style><BackgroundColor>#D6E4F0</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_ID_GH"><Value>=""</Value><Style><BackgroundColor>#D6E4F0</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_PN_GH"><Value>=""</Value><Style><BackgroundColor>#D6E4F0</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_IL_GH"><Value>=""</Value><Style><BackgroundColor>#D6E4F0</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- ROW 3: Customer detail — amber = incomplete, else alternating stripes -->
+                <TablixRow>
+                  <Height>0.22in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="PB7_RD_Det"><Value>=Format(Fields!registration_date_local.Value, "MM/dd/yyyy HH:mm")</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><Color>#333333</Color><BackgroundColor>=IIF(NOT(Fields!phone_verified.Value And Fields!id_verified.Value And Fields!pin_set.Value), "#FFF2CC", IIF(RowNumber("CustomerDetail") Mod 2 = 0, "#F2F8FE", "#FFFFFF"))</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_Cu_Det"><Value>=Fields!customer_display.Value</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><Color>#333333</Color><BackgroundColor>=IIF(NOT(Fields!phone_verified.Value And Fields!id_verified.Value And Fields!pin_set.Value), "#FFF2CC", IIF(RowNumber("CustomerDetail") Mod 2 = 0, "#F2F8FE", "#FFFFFF"))</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_CT_Det"><Value>=Fields!card_type_display.Value</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><Color>#333333</Color><BackgroundColor>=IIF(NOT(Fields!phone_verified.Value And Fields!id_verified.Value And Fields!pin_set.Value), "#FFF2CC", IIF(RowNumber("CustomerDetail") Mod 2 = 0, "#F2F8FE", "#FFFFFF"))</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_Ph_Det"><Value>=IIF(Fields!phone_verified.Value, "Y", "N")</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>=IIF(Fields!phone_verified.Value, "#375623", "#C00000")</Color><BackgroundColor>=IIF(NOT(Fields!phone_verified.Value And Fields!id_verified.Value And Fields!pin_set.Value), "#FFF2CC", IIF(RowNumber("CustomerDetail") Mod 2 = 0, "#F2F8FE", "#FFFFFF"))</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_ID_Det"><Value>=IIF(Fields!id_verified.Value, "Y", "N")</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>=IIF(Fields!id_verified.Value, "#375623", "#C00000")</Color><BackgroundColor>=IIF(NOT(Fields!phone_verified.Value And Fields!id_verified.Value And Fields!pin_set.Value), "#FFF2CC", IIF(RowNumber("CustomerDetail") Mod 2 = 0, "#F2F8FE", "#FFFFFF"))</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_PN_Det"><Value>=IIF(Fields!pin_set.Value, "Y", "N")</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>=IIF(Fields!pin_set.Value, "#375623", "#C00000")</Color><BackgroundColor>=IIF(NOT(Fields!phone_verified.Value And Fields!id_verified.Value And Fields!pin_set.Value), "#FFF2CC", IIF(RowNumber("CustomerDetail") Mod 2 = 0, "#F2F8FE", "#FFFFFF"))</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB7_IL_Det"><Value>=IIF(IsNothing(Fields!initial_load_amount.Value), "—", Format(Fields!initial_load_amount.Value, "$#,##0.00"))</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><Color>#333333</Color><BackgroundColor>=IIF(NOT(Fields!phone_verified.Value And Fields!id_verified.Value And Fields!pin_set.Value), "#FFF2CC", IIF(RowNumber("CustomerDetail") Mod 2 = 0, "#F2F8FE", "#FFFFFF"))</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+              </TablixRows>
+            </TablixBody>
+
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember/><TablixMember/><TablixMember/><TablixMember/>
+                <TablixMember/><TablixMember/><TablixMember/>
+              </TablixMembers>
+            </TablixColumnHierarchy>
+
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <!-- Col header (static, repeat on new pages) -->
+                <TablixMember>
+                  <KeepWithGroup>After</KeepWithGroup>
+                  <RepeatOnNewPage>true</RepeatOnNewPage>
+                  <FixedData>true</FixedData>
+                </TablixMember>
+                <!-- Outer group: operator location -->
+                <TablixMember>
+                  <Group Name="OperatorGroupB">
+                    <GroupExpressions>
+                      <GroupExpression>=Fields!operator_display_name.Value</GroupExpression>
+                    </GroupExpressions>
+                  </Group>
+                  <SortExpressions>
+                    <SortExpression>
+                      <Value>=Fields!operator_display_name.Value</Value>
+                      <Direction>Ascending</Direction>
+                    </SortExpression>
+                  </SortExpressions>
+                  <TablixMembers>
+                    <!-- Group header row -->
+                    <TablixMember>
+                      <KeepWithGroup>After</KeepWithGroup>
+                    </TablixMember>
+                    <!-- Customer detail rows -->
+                    <TablixMember>
+                      <Group Name="CustomerDetail">
+                        <DataGroupName>CustomerDetail</DataGroupName>
+                      </Group>
+                      <SortExpressions>
+                        <SortExpression>
+                          <Value>=Fields!registration_date_local.Value</Value>
+                          <Direction>Descending</Direction>
+                        </SortExpression>
+                      </SortExpressions>
+                    </TablixMember>
+                  </TablixMembers>
+                </TablixMember>
+              </TablixMembers>
+            </TablixRowHierarchy>
+
+            <Top>4.488in</Top>
+            <Left>0in</Left>
+            <Width>10.9in</Width>
+            <Height>0.73in</Height>
+          </Tablix>
+
+        </ReportItems>
+        <Height>8.0in</Height>
+        <Style/>
+      </Body>
+      <Width>10.9in</Width>
+
+      <!-- ════════════════════════════════════════════════════════════════
+           PAGE SETTINGS — A4 Landscape, 10mm margins
+      ════════════════════════════════════════════════════════════════════ -->
+      <Page>
+        <PageWidth>11.69in</PageWidth>
+        <PageHeight>8.27in</PageHeight>
+        <LeftMargin>0.394in</LeftMargin>
+        <RightMargin>0.394in</RightMargin>
+        <TopMargin>0.394in</TopMargin>
+        <BottomMargin>0.394in</BottomMargin>
+        <Style/>
+      </Page>
+
+      <!-- ════════════════════════════════════════════════════════════════
+           PAGE HEADER (repeats from page 2 onwards)
+      ════════════════════════════════════════════════════════════════════ -->
+      <PageHeader>
+        <Height>0.35in</Height>
+        <PrintOnFirstPage>false</PrintOnFirstPage>
+        <PrintOnLastPage>true</PrintOnLastPage>
+        <ReportItems>
+          <Textbox Name="PageHdrTitle">
+            <Value>Customer Registration Summary  —  RPT-008</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#1A1A1A</Color>
+              <VerticalAlign>Middle</VerticalAlign>
+            </Style>
+            <Top>0.04in</Top><Left>0in</Left>
+            <Width>5in</Width><Height>0.2in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+          <Textbox Name="PageHdrOrgDate">
+            <Value>=First(Fields!org_name.Value, "dsKPI") &amp; "  ·  " &amp; Format(Parameters!from_date.Value, "MM/dd/yyyy") &amp; " – " &amp; Format(Parameters!to_date.Value, "MM/dd/yyyy")</Value>
+            <DataSetName>dsKPI</DataSetName>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#555555</Color><VerticalAlign>Middle</VerticalAlign>
+            </Style>
+            <Top>0.24in</Top><Left>0in</Left>
+            <Width>6in</Width><Height>0.14in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+          <Textbox Name="PageHdrRuntime">
+            <Value>="Generated: " &amp; Format(Globals!ExecutionTime, "MM/dd/yyyy HH:mm") &amp; " UTC"</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#888888</Color><TextAlign>Right</TextAlign>
+            </Style>
+            <Top>0.04in</Top><Left>7in</Left>
+            <Width>3.9in</Width><Height>0.14in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+        </ReportItems>
+        <Style/>
+      </PageHeader>
+
+      <!-- ════════════════════════════════════════════════════════════════
+           PAGE FOOTER (every page)
+           Page X of Y  |  CONFIDENTIAL  |  PII note  |  Disclaimer
+      ════════════════════════════════════════════════════════════════════ -->
+      <PageFooter>
+        <Height>0.45in</Height>
+        <PrintOnFirstPage>true</PrintOnFirstPage>
+        <PrintOnLastPage>true</PrintOnLastPage>
+        <ReportItems>
+          <Textbox Name="FooterPageNum">
+            <Value>="Page " &amp; Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+              <Color>#888888</Color><BackgroundColor>#F5F5F5</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign>
+              <BorderColor><Bottom>#DDDDDD</Bottom></BorderColor>
+              <BorderStyle><Bottom>Solid</Bottom></BorderStyle>
+            </Style>
+            <Top>0.05in</Top><Left>0in</Left>
+            <Width>2in</Width><Height>0.22in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+          <Textbox Name="FooterConfidential">
+            <Value>CONFIDENTIAL</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#CC0000</Color>
+              <BackgroundColor>#F5F5F5</BackgroundColor>
+              <TextAlign>Center</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <BorderColor><Bottom>#DDDDDD</Bottom></BorderColor>
+              <BorderStyle><Bottom>Solid</Bottom></BorderStyle>
+            </Style>
+            <Top>0.05in</Top><Left>4in</Left>
+            <Width>2.9in</Width><Height>0.22in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+          <Textbox Name="FooterPiiNote">
+            <Value>PII minimised — first name + last initial only. No phone, PAN, DOB. No Vault JOIN.</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#888888</Color><BackgroundColor>#F5F5F5</BackgroundColor>
+              <TextAlign>Right</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <BorderColor><Bottom>#DDDDDD</Bottom></BorderColor>
+              <BorderStyle><Bottom>Solid</Bottom></BorderStyle>
+            </Style>
+            <Top>0.05in</Top><Left>7.5in</Left>
+            <Width>3.4in</Width><Height>0.22in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+          <Textbox Name="FooterDisclaimer">
+            <Value>Amber rows = incomplete onboarding (phone OR id OR pin missing). Y=#375623, N=#C00000. W/D = type IN(2,7), channel=2, status&lt;&gt;3. No gc.customer_kyc. PCI DSS Req.3 compliant.</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+              <Color>#888888</Color><BackgroundColor>#F5F5F5</BackgroundColor>
+              <TextAlign>Center</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <FontStyle>Italic</FontStyle>
+            </Style>
+            <Top>0.29in</Top><Left>0in</Left>
+            <Width>10.9in</Width><Height>0.14in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+        </ReportItems>
+        <Style>
+          <BackgroundColor>#F5F5F5</BackgroundColor>
+          <BorderColor><Top>#DDDDDD</Top></BorderColor>
+          <BorderStyle><Top>Solid</Top></BorderStyle>
+        </Style>
+      </PageFooter>
+
+    </ReportSection>
+  </ReportSections>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       DATA SOURCES
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <DataSources>
+    <DataSource Name="GTW_GiftCards_DS">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=&lt;sql-server-hostname&gt;;Initial Catalog=GiftCards;Integrated Security=True;ApplicationIntent=ReadOnly</ConnectString>
+        <IntegratedSecurity>true</IntegratedSecurity>
+        <Prompt></Prompt>
+      </ConnectionProperties>
+      <rd:SecurityType>Integrated</rd:SecurityType>
+      <rd:DataSourceID>GTW_GiftCards_DS</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       DATA SETS
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <DataSets>
+
+    <!-- dsKPI — single summary row for the 7 KPI tiles; also supplies org_name + timezone for header -->
+    <DataSet Name="dsKPI">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_customer_registration_kpi</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id">
+            <Value>=Parameters!organization_id.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@from_date">
+            <Value>=Parameters!from_date.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@to_date">
+            <Value>=Parameters!to_date.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@operator_ids">
+            <Value>=IIF(Parameters!operator_ids.Count = 0, Nothing, Join(Parameters!operator_ids.Value, ","))</Value>
+          </QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="new_registrations_count"><DataField>new_registrations_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="physical_card_count"><DataField>physical_card_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="virtual_card_count"><DataField>virtual_card_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="both_card_count"><DataField>both_card_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="physical_card_pct"><DataField>physical_card_pct</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="virtual_card_pct"><DataField>virtual_card_pct</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="both_card_pct"><DataField>both_card_pct</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="phone_verified_count"><DataField>phone_verified_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="phone_verified_pct"><DataField>phone_verified_pct</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="id_verified_count"><DataField>id_verified_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="id_verified_pct"><DataField>id_verified_pct</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="pin_set_count"><DataField>pin_set_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="pin_set_pct"><DataField>pin_set_pct</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="report_from_date_local"><DataField>report_from_date_local</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="report_to_date_local"><DataField>report_to_date_local</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="org_name"><DataField>org_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="org_windows_timezone_id"><DataField>org_windows_timezone_id</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsActivity — one row per operator + ORGANISATION TOTAL for Part A
+         SP sorts: ORGANISATION TOTAL last (sentinel: operator_id = @organization_id) -->
+    <DataSet Name="dsActivity">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_customer_registration_activity</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+          <QueryParameter Name="@from_date"><Value>=Parameters!from_date.Value</Value></QueryParameter>
+          <QueryParameter Name="@to_date"><Value>=Parameters!to_date.Value</Value></QueryParameter>
+          <QueryParameter Name="@operator_ids"><Value>=IIF(Parameters!operator_ids.Count = 0, Nothing, Join(Parameters!operator_ids.Value, ","))</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="operator_id"><DataField>operator_id</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="operator_display_name"><DataField>operator_display_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="new_registrations_count"><DataField>new_registrations_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="total_txn_count"><DataField>total_txn_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="deposit_count"><DataField>deposit_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="deposit_amount"><DataField>deposit_amount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="withdrawal_count"><DataField>withdrawal_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="withdrawal_amount"><DataField>withdrawal_amount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="avg_current_balance"><DataField>avg_current_balance</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsDetail — one row per new customer for Part B
+         BR-17 PII: customer_display = first_name + ' ' + last_initial + '.' only.
+         BR-14: @include_incomplete_only filters to NOT(phone AND id AND pin) when 1.
+         BR-5/6/7: phone_verified/id_verified/pin_set are BIT → System.Boolean -->
+    <DataSet Name="dsDetail">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_customer_registration_detail</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+          <QueryParameter Name="@from_date"><Value>=Parameters!from_date.Value</Value></QueryParameter>
+          <QueryParameter Name="@to_date"><Value>=Parameters!to_date.Value</Value></QueryParameter>
+          <QueryParameter Name="@operator_ids"><Value>=IIF(Parameters!operator_ids.Count = 0, Nothing, Join(Parameters!operator_ids.Value, ","))</Value></QueryParameter>
+          <QueryParameter Name="@include_incomplete_only"><Value>=IIF(Parameters!include_incomplete_only.Value, 1, 0)</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="customer_id"><DataField>customer_id</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="customer_number"><DataField>customer_number</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="registration_date_local"><DataField>registration_date_local</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="operator_id"><DataField>operator_id</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="operator_display_name"><DataField>operator_display_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="customer_display"><DataField>customer_display</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="card_type_display"><DataField>card_type_display</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="phone_verified"><DataField>phone_verified</DataField><rd:TypeName>System.Boolean</rd:TypeName></Field>
+        <Field Name="id_verified"><DataField>id_verified</DataField><rd:TypeName>System.Boolean</rd:TypeName></Field>
+        <Field Name="pin_set"><DataField>pin_set</DataField><rd:TypeName>System.Boolean</rd:TypeName></Field>
+        <Field Name="initial_load_amount"><DataField>initial_load_amount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsOperators — P4 population (shared SP from RPT-001) -->
+    <DataSet Name="dsOperators">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_operators_lst</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="operator_id"><DataField>operator_id</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="display_name"><DataField>display_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+  </DataSets>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       REPORT PARAMETERS (P1–P5)
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <ReportParameters>
+
+    <!-- P1: organization_id — passed by portal in S2S mode -->
+    <ReportParameter Name="organization_id">
+      <DataType>Integer</DataType>
+      <Prompt>Organisation ID</Prompt>
+    </ReportParameter>
+
+    <!-- P2: from_date — first day of current month default -->
+    <ReportParameter Name="from_date">
+      <DataType>DateTime</DataType>
+      <DefaultValue>
+        <Values>
+          <Value>=DateSerial(Year(Today()), Month(Today()), 1)</Value>
+        </Values>
+      </DefaultValue>
+      <Prompt>From Date</Prompt>
+    </ReportParameter>
+
+    <!-- P3: to_date — today default; max 365 days from P2 (enforced in SP) -->
+    <ReportParameter Name="to_date">
+      <DataType>DateTime</DataType>
+      <DefaultValue>
+        <Values>
+          <Value>=Today()</Value>
+        </Values>
+      </DefaultValue>
+      <Prompt>To Date</Prompt>
+    </ReportParameter>
+
+    <!-- P4: operator_ids — multi-value, cascades from P1 via dsOperators; NULL = all -->
+    <ReportParameter Name="operator_ids">
+      <DataType>String</DataType>
+      <MultiValue>true</MultiValue>
+      <Nullable>true</Nullable>
+      <DefaultValue>
+        <Values/>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsOperators</DataSetName>
+          <ValueField>operator_id</ValueField>
+          <LabelField>display_name</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Operators</Prompt>
+    </ReportParameter>
+
+    <!-- P5: include_incomplete_only — BIT filter; default=false = show all registrations -->
+    <ReportParameter Name="include_incomplete_only">
+      <DataType>Boolean</DataType>
+      <DefaultValue>
+        <Values>
+          <Value>false</Value>
+        </Values>
+      </DefaultValue>
+      <Prompt>Incomplete Only</Prompt>
+    </ReportParameter>
+
+  </ReportParameters>
+
+</Report>

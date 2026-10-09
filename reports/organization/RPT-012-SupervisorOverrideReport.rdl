@@ -1,0 +1,1394 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+
+  <AutoRefresh>0</AutoRefresh>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <Language>en-US</Language>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+
+  <!-- ══════════════════════════════════════════════════════════════════
+       DATA SOURCES
+  ════════════════════════════════════════════════════════════════════ -->
+  <DataSources>
+    <DataSource Name="GTW_GiftCards_DS">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=&lt;sql-server-hostname&gt;;Initial Catalog=GiftCards;Integrated Security=True;ApplicationIntent=ReadOnly</ConnectString>
+        <IntegratedSecurity>true</IntegratedSecurity>
+      </ConnectionProperties>
+      <rd:SecurityType>Integrated</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+
+  <!-- ══════════════════════════════════════════════════════════════════
+       DATASETS
+  ════════════════════════════════════════════════════════════════════ -->
+  <DataSets>
+
+    <!-- dsKPI: One summary row for Part A KPI tiles -->
+    <DataSet Name="dsKPI">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_loc_supervisor_override_kpi</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id">
+            <Value>=Parameters!organization_id.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@from_date">
+            <Value>=Parameters!from_date.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@to_date">
+            <Value>=Parameters!to_date.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@operator_ids">
+            <Value>=Join(Parameters!operator_ids.Value, ",")</Value>
+          </QueryParameter>
+          <QueryParameter Name="@terminal_ids">
+            <Value>=Join(Parameters!terminal_ids.Value, ",")</Value>
+          </QueryParameter>
+          <QueryParameter Name="@cashier_ids">
+            <Value>=Join(Parameters!cashier_ids.Value, ",")</Value>
+          </QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="total_override_count"><DataField>total_override_count</DataField></Field>
+        <Field Name="total_amount_approved"><DataField>total_amount_approved</DataField></Field>
+        <Field Name="avg_override_amount"><DataField>avg_override_amount</DataField></Field>
+        <Field Name="avg_response_time_minutes"><DataField>avg_response_time_minutes</DataField></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsDetail: One row per approved supervisor override event for Part B -->
+    <DataSet Name="dsDetail">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_loc_supervisor_override_detail</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+          <QueryParameter Name="@from_date"><Value>=Parameters!from_date.Value</Value></QueryParameter>
+          <QueryParameter Name="@to_date"><Value>=Parameters!to_date.Value</Value></QueryParameter>
+          <QueryParameter Name="@operator_ids"><Value>=Join(Parameters!operator_ids.Value, ",")</Value></QueryParameter>
+          <QueryParameter Name="@terminal_ids"><Value>=Join(Parameters!terminal_ids.Value, ",")</Value></QueryParameter>
+          <QueryParameter Name="@cashier_ids"><Value>=Join(Parameters!cashier_ids.Value, ",")</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="supervisor_approval_id"><DataField>supervisor_approval_id</DataField></Field>
+        <Field Name="requested_datetime_local"><DataField>requested_datetime_local</DataField></Field>
+        <Field Name="approved_datetime_local"><DataField>approved_datetime_local</DataField></Field>
+        <Field Name="location_name"><DataField>location_name</DataField></Field>
+        <Field Name="terminal_name"><DataField>terminal_name</DataField></Field>
+        <Field Name="cashier_display"><DataField>cashier_display</DataField></Field>
+        <Field Name="transaction_reference_number"><DataField>transaction_reference_number</DataField></Field>
+        <Field Name="transaction_type_name"><DataField>transaction_type_name</DataField></Field>
+        <Field Name="amount"><DataField>amount</DataField></Field>
+        <Field Name="approval_tier_name"><DataField>approval_tier_name</DataField></Field>
+        <Field Name="approver_display_name"><DataField>approver_display_name</DataField></Field>
+        <Field Name="response_time_minutes"><DataField>response_time_minutes</DataField></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsLocations: Available values for operator_ids parameter -->
+    <DataSet Name="dsLocations">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_operators_lst</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="operator_id"><DataField>operator_id</DataField></Field>
+        <Field Name="operator_name"><DataField>operator_name</DataField></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsTerminals: Available values for terminal_ids parameter — cascades from operator_ids -->
+    <DataSet Name="dsTerminals">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_loc_terminals_lst</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+          <QueryParameter Name="@operator_ids"><Value>=Join(Parameters!operator_ids.Value, ",")</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="terminal_id"><DataField>terminal_id</DataField></Field>
+        <Field Name="display_name"><DataField>display_name</DataField></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsCashiers: Available values for cashier_ids parameter -->
+    <DataSet Name="dsCashiers">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_location_cashiers_lst</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="user_id"><DataField>user_id</DataField></Field>
+        <Field Name="display_name"><DataField>display_name</DataField></Field>
+      </Fields>
+    </DataSet>
+
+  </DataSets>
+
+  <!-- ══════════════════════════════════════════════════════════════════
+       REPORT PARAMETERS
+  ════════════════════════════════════════════════════════════════════ -->
+  <ReportParameters>
+
+    <!-- organization_id: Hidden — populated from auth context (S2S) -->
+    <ReportParameter Name="organization_id">
+      <DataType>Integer</DataType>
+      <Prompt>Organisation</Prompt>
+      <Hidden>true</Hidden>
+    </ReportParameter>
+
+    <!-- from_date: Date picker; defaults to first day of current month -->
+    <ReportParameter Name="from_date">
+      <DataType>DateTime</DataType>
+      <DefaultValue>
+        <Values><Value>=DateSerial(Year(Today()), Month(Today()), 1)</Value></Values>
+      </DefaultValue>
+      <Prompt>From Date</Prompt>
+    </ReportParameter>
+
+    <!-- to_date: Date picker; defaults to today -->
+    <ReportParameter Name="to_date">
+      <DataType>DateTime</DataType>
+      <DefaultValue>
+        <Values><Value>=Today()</Value></Values>
+      </DefaultValue>
+      <Prompt>To Date</Prompt>
+    </ReportParameter>
+
+    <!-- operator_ids: Multi-value; cascades on organization_id; defaults to All -->
+    <ReportParameter Name="operator_ids">
+      <DataType>Integer</DataType>
+      <MultiValue>true</MultiValue>
+      <DefaultValue>
+        <DataSetReference>
+          <DataSetName>dsLocations</DataSetName>
+          <ValueField>operator_id</ValueField>
+        </DataSetReference>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsLocations</DataSetName>
+          <ValueField>operator_id</ValueField>
+          <LabelField>operator_name</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Location</Prompt>
+    </ReportParameter>
+
+    <!-- terminal_ids: Multi-value; cascades on operator_ids; defaults to All -->
+    <ReportParameter Name="terminal_ids">
+      <DataType>Integer</DataType>
+      <MultiValue>true</MultiValue>
+      <DefaultValue>
+        <DataSetReference>
+          <DataSetName>dsTerminals</DataSetName>
+          <ValueField>terminal_id</ValueField>
+        </DataSetReference>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsTerminals</DataSetName>
+          <ValueField>terminal_id</ValueField>
+          <LabelField>display_name</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Terminal</Prompt>
+    </ReportParameter>
+
+    <!-- cashier_ids: Multi-value; org-wide list; defaults to All -->
+    <ReportParameter Name="cashier_ids">
+      <DataType>Integer</DataType>
+      <MultiValue>true</MultiValue>
+      <DefaultValue>
+        <DataSetReference>
+          <DataSetName>dsCashiers</DataSetName>
+          <ValueField>user_id</ValueField>
+        </DataSetReference>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsCashiers</DataSetName>
+          <ValueField>user_id</ValueField>
+          <LabelField>display_name</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Cashier</Prompt>
+    </ReportParameter>
+
+  </ReportParameters>
+
+  <!-- ══════════════════════════════════════════════════════════════════
+       REPORT SECTIONS
+  ════════════════════════════════════════════════════════════════════ -->
+  <ReportSections>
+    <ReportSection>
+
+      <!-- ═════════════════════════════════════════════════════════════
+           PAGE DEFINITION — A4 Portrait, 10mm all margins
+      ═════════════════════════════════════════════════════════════════ -->
+      <Page>
+
+        <!-- ── PAGE HEADER ── -->
+        <PageHeader>
+          <Height>0.75in</Height>
+          <PrintOnFirstPage>true</PrintOnFirstPage>
+          <PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+
+            <!-- Dark background rectangle -->
+            <Rectangle Name="rectPageHeader">
+              <Left>0in</Left><Top>0in</Top>
+              <Width>8.052in</Width><Height>0.75in</Height>
+              <Style>
+                <BackgroundColor>#1A1A1A</BackgroundColor>
+                <Border><Style>None</Style></Border>
+              </Style>
+            </Rectangle>
+
+            <!-- Purple accent strip — left edge compliance indicator -->
+            <Rectangle Name="rectHeaderAccent">
+              <Left>0in</Left><Top>0in</Top>
+              <Width>0.063in</Width><Height>0.75in</Height>
+              <ZIndex>1</ZIndex>
+              <Style>
+                <BackgroundColor>#7B2D8B</BackgroundColor>
+                <Border><Style>None</Style></Border>
+              </Style>
+            </Rectangle>
+
+            <!-- Title: "Supervisor Override Report" -->
+            <Textbox Name="tbHeaderTitle">
+              <Left>0.1in</Left><Top>0.06in</Top>
+              <Width>5.5in</Width><Height>0.22in</Height>
+              <ZIndex>2</ZIndex>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>Supervisor Override Report</Value>
+                <Style>
+                  <Color>#FFFFFF</Color>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>13pt</FontSize>
+                  <FontWeight>Bold</FontWeight>
+                </Style>
+              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+            <!-- Subtitle: org + location + period context -->
+            <Textbox Name="tbHeaderOrg">
+              <Left>0.1in</Left><Top>0.30in</Top>
+              <Width>5.5in</Width><Height>0.18in</Height>
+              <ZIndex>2</ZIndex>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>="Period: " &amp; Format(Parameters!from_date.Value, "MM/dd/yyyy") &amp; " 00:00 – " &amp; Format(Parameters!to_date.Value, "MM/dd/yyyy") &amp; " 23:59"</Value>
+                <Style>
+                  <Color>#AAAAAA</Color>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8.5pt</FontSize>
+                </Style>
+              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+            <!-- Filter line: terminals + cashiers summary -->
+            <Textbox Name="tbHeaderFilters">
+              <Left>0.1in</Left><Top>0.50in</Top>
+              <Width>5.5in</Width><Height>0.18in</Height>
+              <ZIndex>2</ZIndex>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>="Terminals: " &amp; IIF(Parameters!terminal_ids.Count = CountRows("dsTerminals"), "All", Join(Parameters!terminal_ids.Label, ", ")) &amp; "  ·  Cashiers: " &amp; IIF(Parameters!cashier_ids.Count = CountRows("dsCashiers"), "All", Join(Parameters!cashier_ids.Label, ", "))</Value>
+                <Style>
+                  <Color>#888888</Color>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8pt</FontSize>
+                </Style>
+              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+            <!-- Right: Generated datetime -->
+            <Textbox Name="tbHeaderGenerated">
+              <Left>5.75in</Left><Top>0.06in</Top>
+              <Width>2.302in</Width><Height>0.18in</Height>
+              <ZIndex>2</ZIndex>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>="Generated: " &amp; Format(Globals!ExecutionTime, "MM/dd/yyyy HH:mm") &amp; " UTC"</Value>
+                <Style>
+                  <Color>#AAAAAA</Color>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8.5pt</FontSize>
+                </Style>
+              </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+            <!-- Right: By user -->
+            <Textbox Name="tbHeaderUser">
+              <Left>5.75in</Left><Top>0.26in</Top>
+              <Width>2.302in</Width><Height>0.18in</Height>
+              <ZIndex>2</ZIndex>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>="By: " &amp; User!UserID</Value>
+                <Style>
+                  <Color>#AAAAAA</Color>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8.5pt</FontSize>
+                </Style>
+              </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+            <!-- Right: Report ID -->
+            <Textbox Name="tbHeaderReportID">
+              <Left>5.75in</Left><Top>0.46in</Top>
+              <Width>2.302in</Width><Height>0.18in</Height>
+              <ZIndex>2</ZIndex>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>Report ID: RPT-012  ·  SSRS Web Portal</Value>
+                <Style>
+                  <Color>#888888</Color>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8pt</FontSize>
+                </Style>
+              </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+          </ReportItems>
+          <Style />
+        </PageHeader>
+
+        <!-- ── PAGE FOOTER ── -->
+        <PageFooter>
+          <Height>0.30in</Height>
+          <PrintOnFirstPage>true</PrintOnFirstPage>
+          <PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+
+            <!-- Left: access/confidentiality label -->
+            <Textbox Name="tbFooterLabel">
+              <Left>0in</Left><Top>0.05in</Top>
+              <Width>6.5in</Width><Height>0.20in</Height>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>RPT-012 — Supervisor Override Report  ·  Confidential — Internal Use Only  ·  Access: GTW Admin, Org Owner (role_id=8), Org Supervisor (role_id=9)</Value>
+                <Style>
+                  <Color>#AAAAAA</Color>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>7pt</FontSize>
+                </Style>
+              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+            <!-- Right: Page X of Y -->
+            <Textbox Name="tbFooterPage">
+              <Left>6.5in</Left><Top>0.05in</Top>
+              <Width>1.552in</Width><Height>0.20in</Height>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>="Page " &amp; Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value>
+                <Style>
+                  <Color>#AAAAAA</Color>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>7pt</FontSize>
+                </Style>
+              </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+          </ReportItems>
+          <Style />
+        </PageFooter>
+
+        <!-- A4 Portrait page dimensions -->
+        <PageHeight>11.693in</PageHeight>
+        <PageWidth>8.268in</PageWidth>
+        <LeftMargin>0.394in</LeftMargin>
+        <RightMargin>0.394in</RightMargin>
+        <TopMargin>0.394in</TopMargin>
+        <BottomMargin>0.394in</BottomMargin>
+        <Style />
+      </Page>
+
+      <!-- ═════════════════════════════════════════════════════════════
+           BODY
+           Direct body children (TraceCounts deviation — no root wrap):
+             1. KpiBanner (Textbox)
+             2. PartASection (Tablix)
+             3. PartBBanner (Textbox)
+             4. PartBSection (Tablix)
+             5. FootnoteStrip (Rectangle)
+             6. FilterSummaryPanel (Rectangle)
+      ═════════════════════════════════════════════════════════════════ -->
+      <Body>
+        <Height>18in</Height>
+        <Width>8.052in</Width>
+        <ReportItems>
+
+          <!-- ══════════════════════════════════════════════════════════
+               1. KPI BANNER — section label strip
+          ════════════════════════════════════════════════════════════ -->
+          <Textbox Name="tbKpiBanner">
+            <Left>0in</Left><Top>0in</Top>
+            <Width>8.052in</Width><Height>0.188in</Height>
+            <Paragraphs>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>PART A — KPI SUMMARY</Value>
+                    <Style>
+                      <Color>#4A1060</Color>
+                      <FontFamily>Calibri</FontFamily>
+                      <FontSize>8.5pt</FontSize>
+                      <FontWeight>Bold</FontWeight>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+                <Style><TextAlign>Left</TextAlign></Style>
+              </Paragraph>
+            </Paragraphs>
+            <Style>
+              <BackgroundColor>#E8D5F0</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign>
+              <PaddingLeft>6pt</PaddingLeft>
+              <Border><Style>None</Style></Border>
+            </Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+
+          <!-- KPI banner right-side SP label — overlaid via absolute position textbox -->
+          <Textbox Name="tbKpiBannerSP">
+            <Left>4.5in</Left><Top>0in</Top>
+            <Width>3.552in</Width><Height>0.188in</Height>
+            <ZIndex>1</ZIndex>
+            <Paragraphs>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>dsKPI  ·  gc.rpt_loc_supervisor_override_kpi</Value>
+                    <Style>
+                      <Color>#7B2D8B</Color>
+                      <FontFamily>Calibri</FontFamily>
+                      <FontSize>7.5pt</FontSize>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+                <Style><TextAlign>Right</TextAlign></Style>
+              </Paragraph>
+            </Paragraphs>
+            <Style>
+              <BackgroundColor>#E8D5F0</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign>
+              <PaddingRight>4pt</PaddingRight>
+              <Border><Style>None</Style></Border>
+            </Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+
+          <!-- ══════════════════════════════════════════════════════════
+               2. PART A — KPI TABLIX (TablePartA)
+               2 columns × 2 data rows — 4 KPI tiles (2×2 grid)
+               Each cell contains a nested rectangle tile card.
+               Width: 8.052in / 2 = 4.026in per column
+          ════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablePartA">
+            <DataSetName>dsKPI</DataSetName>
+            <Left>0in</Left><Top>0.208in</Top>
+            <Width>8.052in</Width><Height>1.500in</Height>
+            <NoRowsMessage>No KPI data available for the selected filters.</NoRowsMessage>
+
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>4.026in</Width></TablixColumn>
+                <TablixColumn><Width>4.026in</Width></TablixColumn>
+              </TablixColumns>
+
+              <TablixRows>
+
+                <!-- ── KPI Row 1: Tile 1 (Total Override Approvals) + Tile 2 (Total Amount Approved) ── -->
+                <TablixRow>
+                  <Height>0.750in</Height>
+                  <TablixCells>
+
+                    <!-- Tile 1: TOTAL OVERRIDE APPROVALS — accent #1A1A1A -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="rectKpi1">
+                          <Left>0in</Left><Top>0in</Top>
+                          <Width>4.026in</Width><Height>0.750in</Height>
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <Border><Style>Solid</Style><Color>#D5C0E8</Color><Width>0.75pt</Width></Border>
+                          </Style>
+                          <ReportItems>
+                            <!-- Colored accent strip -->
+                            <Rectangle Name="rectKpi1Accent">
+                              <Left>0in</Left><Top>0in</Top>
+                              <Width>0.052in</Width><Height>0.750in</Height>
+                              <Style><BackgroundColor>#1A1A1A</BackgroundColor><Border><Style>None</Style></Border></Style>
+                            </Rectangle>
+                            <!-- Label -->
+                            <Textbox Name="tbKpi1Label">
+                              <Left>0.1in</Left><Top>0.06in</Top>
+                              <Width>3.826in</Width><Height>0.15in</Height>
+                              <Paragraphs><Paragraph><TextRuns><TextRun>
+                                <Value>TOTAL OVERRIDE APPROVALS</Value>
+                                <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                              <CanGrow>true</CanGrow>
+                            </Textbox>
+                            <!-- Value -->
+                            <Textbox Name="tbKpi1Value">
+                              <Left>0.1in</Left><Top>0.22in</Top>
+                              <Width>3.826in</Width><Height>0.32in</Height>
+                              <Paragraphs><Paragraph><TextRuns><TextRun>
+                                <Value>=Format(Fields!total_override_count.Value, "#,##0")</Value>
+                                <Style><Color>#1A1A1A</Color><FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                              <CanGrow>true</CanGrow>
+                            </Textbox>
+                            <!-- Subtext -->
+                            <Textbox Name="tbKpi1Sub">
+                              <Left>0.1in</Left><Top>0.58in</Top>
+                              <Width>3.826in</Width><Height>0.13in</Height>
+                              <Paragraphs><Paragraph><TextRuns><TextRun>
+                                <Value>Override events in selected period</Value>
+                                <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                              <CanGrow>true</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                    <!-- Tile 2: TOTAL AMOUNT APPROVED — accent #375623 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="rectKpi2">
+                          <Left>0in</Left><Top>0in</Top>
+                          <Width>4.026in</Width><Height>0.750in</Height>
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <Border><Style>Solid</Style><Color>#D5C0E8</Color><Width>0.75pt</Width></Border>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="rectKpi2Accent">
+                              <Left>0in</Left><Top>0in</Top>
+                              <Width>0.052in</Width><Height>0.750in</Height>
+                              <Style><BackgroundColor>#375623</BackgroundColor><Border><Style>None</Style></Border></Style>
+                            </Rectangle>
+                            <Textbox Name="tbKpi2Label">
+                              <Left>0.1in</Left><Top>0.06in</Top>
+                              <Width>3.826in</Width><Height>0.15in</Height>
+                              <Paragraphs><Paragraph><TextRuns><TextRun>
+                                <Value>TOTAL AMOUNT APPROVED</Value>
+                                <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                              <CanGrow>true</CanGrow>
+                            </Textbox>
+                            <Textbox Name="tbKpi2Value">
+                              <Left>0.1in</Left><Top>0.22in</Top>
+                              <Width>3.826in</Width><Height>0.32in</Height>
+                              <Paragraphs><Paragraph><TextRuns><TextRun>
+                                <Value>="$" &amp; Format(Fields!total_amount_approved.Value, "#,##0.00")</Value>
+                                <Style><Color>#375623</Color><FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                              <CanGrow>true</CanGrow>
+                            </Textbox>
+                            <Textbox Name="tbKpi2Sub">
+                              <Left>0.1in</Left><Top>0.58in</Top>
+                              <Width>3.826in</Width><Height>0.13in</Height>
+                              <Paragraphs><Paragraph><TextRuns><TextRun>
+                                <Value>SUM(gc.transactions.amount) for supervisor-approved rows</Value>
+                                <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                              <CanGrow>true</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- ── KPI Row 2: Tile 3 (Avg Override Amount) + Tile 4 (Avg Response Time) ── -->
+                <TablixRow>
+                  <Height>0.750in</Height>
+                  <TablixCells>
+
+                    <!-- Tile 3: AVG OVERRIDE AMOUNT — accent #1F3864 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="rectKpi3">
+                          <Left>0in</Left><Top>0in</Top>
+                          <Width>4.026in</Width><Height>0.750in</Height>
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <Border><Style>Solid</Style><Color>#D5C0E8</Color><Width>0.75pt</Width></Border>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="rectKpi3Accent">
+                              <Left>0in</Left><Top>0in</Top>
+                              <Width>0.052in</Width><Height>0.750in</Height>
+                              <Style><BackgroundColor>#1F3864</BackgroundColor><Border><Style>None</Style></Border></Style>
+                            </Rectangle>
+                            <Textbox Name="tbKpi3Label">
+                              <Left>0.1in</Left><Top>0.06in</Top>
+                              <Width>3.826in</Width><Height>0.15in</Height>
+                              <Paragraphs><Paragraph><TextRuns><TextRun>
+                                <Value>AVG OVERRIDE AMOUNT</Value>
+                                <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                              <CanGrow>true</CanGrow>
+                            </Textbox>
+                            <Textbox Name="tbKpi3Value">
+                              <Left>0.1in</Left><Top>0.22in</Top>
+                              <Width>3.826in</Width><Height>0.32in</Height>
+                              <Paragraphs><Paragraph><TextRuns><TextRun>
+                                <Value>="$" &amp; Format(Fields!avg_override_amount.Value, "#,##0.00")</Value>
+                                <Style><Color>#1F3864</Color><FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                              <CanGrow>true</CanGrow>
+                            </Textbox>
+                            <Textbox Name="tbKpi3Sub">
+                              <Left>0.1in</Left><Top>0.58in</Top>
+                              <Width>3.826in</Width><Height>0.13in</Height>
+                              <Paragraphs><Paragraph><TextRuns><TextRun>
+                                <Value>AVG(gc.transactions.amount) — approved overrides only</Value>
+                                <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                              <CanGrow>true</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                    <!-- Tile 4: AVG RESPONSE TIME — accent #C45911 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="rectKpi4">
+                          <Left>0in</Left><Top>0in</Top>
+                          <Width>4.026in</Width><Height>0.750in</Height>
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <Border><Style>Solid</Style><Color>#D5C0E8</Color><Width>0.75pt</Width></Border>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="rectKpi4Accent">
+                              <Left>0in</Left><Top>0in</Top>
+                              <Width>0.052in</Width><Height>0.750in</Height>
+                              <Style><BackgroundColor>#C45911</BackgroundColor><Border><Style>None</Style></Border></Style>
+                            </Rectangle>
+                            <Textbox Name="tbKpi4Label">
+                              <Left>0.1in</Left><Top>0.06in</Top>
+                              <Width>3.826in</Width><Height>0.15in</Height>
+                              <Paragraphs><Paragraph><TextRuns><TextRun>
+                                <Value>AVG RESPONSE TIME</Value>
+                                <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                              <CanGrow>true</CanGrow>
+                            </Textbox>
+                            <!-- Null-guarded avg_response_time_minutes value -->
+                            <Textbox Name="tbKpi4Value">
+                              <Left>0.1in</Left><Top>0.22in</Top>
+                              <Width>3.826in</Width><Height>0.32in</Height>
+                              <Paragraphs><Paragraph><TextRuns><TextRun>
+                                <Value>=IIF(IsNothing(Fields!avg_response_time_minutes.Value), "N/A", Format(Fields!avg_response_time_minutes.Value, "#,##0") &amp; " min")</Value>
+                                <Style><Color>#C45911</Color><FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                              <CanGrow>true</CanGrow>
+                            </Textbox>
+                            <Textbox Name="tbKpi4Sub">
+                              <Left>0.1in</Left><Top>0.58in</Top>
+                              <Width>3.826in</Width><Height>0.13in</Height>
+                              <Paragraphs><Paragraph><TextRuns><TextRun>
+                                <Value>AVG(DATEDIFF(MINUTE, sa.requested_datetime, sa.approved_datetime))</Value>
+                                <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                              <CanGrow>true</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                  </TablixCells>
+                </TablixRow>
+
+              </TablixRows>
+            </TablixBody>
+
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember /><TablixMember />
+              </TablixMembers>
+            </TablixColumnHierarchy>
+
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <!-- Row 1 — KPI tiles row 1 -->
+                <TablixMember />
+                <!-- Row 2 — KPI tiles row 2 -->
+                <TablixMember />
+              </TablixMembers>
+            </TablixRowHierarchy>
+
+            <Style><Border><Style>None</Style></Border></Style>
+          </Tablix>
+
+          <!-- ══════════════════════════════════════════════════════════
+               3. PART B BANNER — section label strip
+          ════════════════════════════════════════════════════════════ -->
+          <Textbox Name="tbPartBBanner">
+            <Left>0in</Left><Top>1.750in</Top>
+            <Width>8.052in</Width><Height>0.188in</Height>
+            <Paragraphs>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>PART B — OVERRIDE DETAIL</Value>
+                    <Style>
+                      <Color>#4A1060</Color>
+                      <FontFamily>Calibri</FontFamily>
+                      <FontSize>8.5pt</FontSize>
+                      <FontWeight>Bold</FontWeight>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+                <Style><TextAlign>Left</TextAlign></Style>
+              </Paragraph>
+            </Paragraphs>
+            <Style>
+              <BackgroundColor>#E8D5F0</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign>
+              <PaddingLeft>6pt</PaddingLeft>
+              <Border><Style>None</Style></Border>
+            </Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+
+          <!-- Part B banner right-side SP label -->
+          <Textbox Name="tbPartBBannerSP">
+            <Left>4.5in</Left><Top>1.750in</Top>
+            <Width>3.552in</Width><Height>0.188in</Height>
+            <ZIndex>1</ZIndex>
+            <Paragraphs>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>dsDetail  ·  gc.rpt_loc_supervisor_override_detail</Value>
+                    <Style>
+                      <Color>#7B2D8B</Color>
+                      <FontFamily>Calibri</FontFamily>
+                      <FontSize>7.5pt</FontSize>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+                <Style><TextAlign>Right</TextAlign></Style>
+              </Paragraph>
+            </Paragraphs>
+            <Style>
+              <BackgroundColor>#E8D5F0</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign>
+              <PaddingRight>4pt</PaddingRight>
+              <Border><Style>None</Style></Border>
+            </Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+
+          <!-- ══════════════════════════════════════════════════════════
+               4. PART B — DETAIL TABLIX (TablePartB)
+               10 columns, banded rows, FixedData + RepeatOnNewPage
+
+               Column widths (sum = 8.052in):
+                 Col1  Req. Date/Time    0.861in
+                 Col2  Appr. Date/Time   0.861in
+                 Col3  Location          0.974in
+                 Col4  Terminal          0.599in
+                 Col5  Cashier (Req.)    0.749in
+                 Col6  Txn Ref #         0.835in
+                 Col7  Amount            0.700in
+                 Col8  Tier              0.562in
+                 Col9  Approver          1.139in
+                 Col10 Resp. (min)       0.772in
+                 Total = 8.052in
+          ════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablePartB">
+            <DataSetName>dsDetail</DataSetName>
+            <Left>0in</Left><Top>1.958in</Top>
+            <Width>8.052in</Width>
+            <NoRowsMessage>No approved supervisor override events found for the selected filters and date range.</NoRowsMessage>
+
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>0.861in</Width></TablixColumn>
+                <TablixColumn><Width>0.861in</Width></TablixColumn>
+                <TablixColumn><Width>0.974in</Width></TablixColumn>
+                <TablixColumn><Width>0.599in</Width></TablixColumn>
+                <TablixColumn><Width>0.749in</Width></TablixColumn>
+                <TablixColumn><Width>0.835in</Width></TablixColumn>
+                <TablixColumn><Width>0.700in</Width></TablixColumn>
+                <TablixColumn><Width>0.562in</Width></TablixColumn>
+                <TablixColumn><Width>1.139in</Width></TablixColumn>
+                <TablixColumn><Width>0.772in</Width></TablixColumn>
+              </TablixColumns>
+
+              <TablixRows>
+
+                <!-- ── Header row: background #4A1060, white text, 7.5pt bold ── -->
+                <TablixRow>
+                  <Height>0.229in</Height>
+                  <TablixCells>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thReqDateTime">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Req. Date/Time</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#4A1060</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thApprDateTime">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Appr. Date/Time</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#4A1060</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thLocation">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Location</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#4A1060</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thTerminal">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Terminal</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#4A1060</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thCashierReq">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Cashier (Req.)</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#4A1060</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thTxnRef">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Txn Ref #</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#4A1060</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thAmount">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Amount</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#4A1060</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingRight>3pt</PaddingRight><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thTier">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Tier</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#4A1060</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thApprover">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Approver</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#4A1060</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thRespMin">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Resp. (min)</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#4A1060</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingRight>3pt</PaddingRight><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- ── Detail row: alternating white / light purple #F7F2FB ── -->
+                <TablixRow>
+                  <Height>0.208in</Height>
+                  <TablixCells>
+
+                    <!-- Col 1: requested_datetime_local — MM/dd/yyyy HH:mm -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdReqDateTime">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Format(Fields!requested_datetime_local.Value, "MM/dd/yyyy HH:mm")</Value>
+                          <Style><Color>#1A1A1A</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F7F2FB", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign>
+                          <PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- Col 2: approved_datetime_local — MM/dd/yyyy HH:mm -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdApprDateTime">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Format(Fields!approved_datetime_local.Value, "MM/dd/yyyy HH:mm")</Value>
+                          <Style><Color>#1A1A1A</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F7F2FB", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign>
+                          <PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- Col 3: location_name -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdLocation">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Fields!location_name.Value</Value>
+                          <Style><Color>#1A1A1A</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F7F2FB", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign>
+                          <PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- Col 4: terminal_name -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdTerminal">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Fields!terminal_name.Value</Value>
+                          <Style><Color>#1A1A1A</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F7F2FB", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign>
+                          <PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- Col 5: cashier_display (PII-minimised first + last_initial) -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdCashierDisplay">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Fields!cashier_display.Value</Value>
+                          <Style><Color>#1A1A1A</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F7F2FB", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign>
+                          <PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- Col 6: transaction_reference_number -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdTxnRef">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Fields!transaction_reference_number.Value</Value>
+                          <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F7F2FB", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign>
+                          <PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- Col 7: amount — green #375623, bold, right-aligned -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdAmount">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>="$" &amp; Format(Fields!amount.Value, "#,##0.00")</Value>
+                          <Style><Color>#375623</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F7F2FB", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign>
+                          <PaddingRight>3pt</PaddingRight>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- Col 8: approval_tier_name — bound from DB ("Supervisor" or "Owner") -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdTier">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Fields!approval_tier_name.Value</Value>
+                          <Style><Color>#1A1A1A</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F7F2FB", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign>
+                          <PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- Col 9: approver_display_name (full name — internal audit report) -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdApprover">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Fields!approver_display_name.Value</Value>
+                          <Style><Color>#1A1A1A</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F7F2FB", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign>
+                          <PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- Col 10: response_time_minutes — right-aligned, null-guarded -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdRespMin">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=IIF(IsNothing(Fields!response_time_minutes.Value), "", Format(Fields!response_time_minutes.Value, "#,##0"))</Value>
+                          <Style><Color>#1A1A1A</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F7F2FB", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign>
+                          <PaddingRight>3pt</PaddingRight>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                  </TablixCells>
+                </TablixRow>
+
+              </TablixRows>
+            </TablixBody>
+
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+              </TablixMembers>
+            </TablixColumnHierarchy>
+
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <!-- Header row member — FixedData (screen freeze) + RepeatOnNewPage (PDF print) -->
+                <TablixMember>
+                  <FixedData>true</FixedData>
+                  <KeepWithGroup>After</KeepWithGroup>
+                  <RepeatOnNewPage>true</RepeatOnNewPage>
+                  <KeepTogether>true</KeepTogether>
+                </TablixMember>
+                <!-- Detail row member -->
+                <TablixMember>
+                  <Group Name="TablePartB_Details">
+                    <DataGroupName>TablePartB_Details</DataGroupName>
+                  </Group>
+                </TablixMember>
+              </TablixMembers>
+            </TablixRowHierarchy>
+
+            <Style><Border><Style>None</Style></Border></Style>
+          </Tablix>
+
+          <!-- ══════════════════════════════════════════════════════════
+               5. FOOTNOTE STRIP
+               Four report notes sourced from SVG text lines
+          ════════════════════════════════════════════════════════════ -->
+          <Rectangle Name="FootnoteStrip">
+            <Left>0in</Left><Top>13.0in</Top>
+            <Width>8.052in</Width><Height>0.700in</Height>
+            <Style>
+              <BackgroundColor>#FFFFFF</BackgroundColor>
+              <Border><Style>None</Style></Border>
+            </Style>
+            <ReportItems>
+
+              <Textbox Name="tbFootnoteHeader">
+                <Left>0in</Left><Top>0in</Top>
+                <Width>8.052in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>Report Notes:</Value>
+                  <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <Textbox Name="tbFootnote1">
+                <Left>0in</Left><Top>0.13in</Top>
+                <Width>8.052in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>&#xB9;  Only transactions with a committed supervisor_approval_id are shown. Unapproved or expired approval requests are not recorded in gc.transactions and do not appear in this report.</Value>
+                  <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <Textbox Name="tbFootnote2">
+                <Left>0in</Left><Top>0.26in</Top>
+                <Width>8.052in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>&#xB2;  Cashier display: first_name + last_initial + '.' (PII-minimised). Approver display: full name (internal compliance report).</Value>
+                  <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <Textbox Name="tbFootnote3">
+                <Left>0in</Left><Top>0.39in</Top>
+                <Width>8.052in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>&#xB3;  Resp. (min): DATEDIFF(MINUTE, sa.requested_datetime, sa.approved_datetime). Date/times shown in organisation local time as converted by SP.</Value>
+                  <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <Textbox Name="tbFootnote4">
+                <Left>0in</Left><Top>0.52in</Top>
+                <Width>8.052in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>&#x2074;  Approval Tier sourced from mst.approval_tier via gc.supervisor_approval.approval_tier FK. Threshold configuration is managed separately in gc.approval_threshold.</Value>
+                  <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+            </ReportItems>
+          </Rectangle>
+
+          <!-- ══════════════════════════════════════════════════════════
+               6. FILTER SUMMARY PANEL
+               Background #F7F2FB, left purple accent strip #7B2D8B
+          ════════════════════════════════════════════════════════════ -->
+          <Rectangle Name="FilterSummaryPanel">
+            <Left>0in</Left><Top>13.75in</Top>
+            <Width>8.052in</Width><Height>0.625in</Height>
+            <Style>
+              <BackgroundColor>#F7F2FB</BackgroundColor>
+              <Border><Style>None</Style></Border>
+            </Style>
+            <ReportItems>
+
+              <!-- Left accent strip -->
+              <Rectangle Name="rectFilterAccent">
+                <Left>0in</Left><Top>0in</Top>
+                <Width>0.042in</Width><Height>0.625in</Height>
+                <Style><BackgroundColor>#7B2D8B</BackgroundColor><Border><Style>None</Style></Border></Style>
+              </Rectangle>
+
+              <!-- "Applied Filters" label -->
+              <Textbox Name="tbFilterHeader">
+                <Left>0.08in</Left><Top>0.04in</Top>
+                <Width>4in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>Applied Filters</Value>
+                  <Style><Color>#4A1060</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <!-- Organisation filter display -->
+              <Textbox Name="tbFilterOrg">
+                <Left>0.08in</Left><Top>0.17in</Top>
+                <Width>4in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>="Locations: " &amp; IIF(Parameters!operator_ids.Count = CountRows("dsLocations"), "All", Join(Parameters!operator_ids.Label, ", "))</Value>
+                  <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <!-- Terminals + Cashiers filter display -->
+              <Textbox Name="tbFilterTermCashier">
+                <Left>0.08in</Left><Top>0.30in</Top>
+                <Width>4in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>="Terminals: " &amp; IIF(Parameters!terminal_ids.Count = CountRows("dsTerminals"), "All", Join(Parameters!terminal_ids.Label, ", ")) &amp; "  ·  Cashiers: " &amp; IIF(Parameters!cashier_ids.Count = CountRows("dsCashiers"), "All", Join(Parameters!cashier_ids.Label, ", "))</Value>
+                  <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <!-- Date range filter display -->
+              <Textbox Name="tbFilterDateRange">
+                <Left>0.08in</Left><Top>0.43in</Top>
+                <Width>4in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>="Date Range: " &amp; Format(Parameters!from_date.Value, "MM/dd/yyyy") &amp; " 00:00 – " &amp; Format(Parameters!to_date.Value, "MM/dd/yyyy") &amp; " 23:59 local  (converted to UTC internally by SP)"</Value>
+                  <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <!-- Right side: parameter + data source notes -->
+              <Textbox Name="tbFilterNotes1">
+                <Left>4.1in</Left><Top>0.04in</Top>
+                <Width>3.952in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>Parameters passed as SSRS report parameters → gc.rpt_loc_supervisor_override_kpi / _detail</Value>
+                  <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <Textbox Name="tbFilterNotes2">
+                <Left>4.1in</Left><Top>0.17in</Top>
+                <Width>3.952in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>NULL = All (no filter applied)  ·  Multi-value params: comma-delimited NVARCHAR(MAX)</Value>
+                  <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <Textbox Name="tbFilterNotes3">
+                <Left>4.1in</Left><Top>0.30in</Top>
+                <Width>3.952in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>Data source: GTW_GiftCards_DS  ·  Auth: Windows Auth S2S  ·  ApplicationIntent=ReadOnly</Value>
+                  <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+            </ReportItems>
+          </Rectangle>
+
+        </ReportItems>
+        <Style />
+      </Body>
+
+    </ReportSection>
+  </ReportSections>
+
+</Report>

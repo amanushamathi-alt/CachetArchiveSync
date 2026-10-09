@@ -1,0 +1,589 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  RPT-010 — Transactions Subreport
+  Called from: RPT-010-Customer-Account-Inquiry.rdl (TransactionSubreportItem)
+  SSRS Report Definition Language (RDL 2016)
+  Spec:   coding-agent/specs/web-reports/RPT-010-customer-account-inquiry.md §8.3
+  Deploy to: /GTW/GiftCards/RPT-010-Transactions-Subreport.rdl
+  Data source: GTW_GiftCards_DS  (Windows Auth S2S, GiftCards DB, ReadOnly)
+
+  This is an embedded subreport — no page header or page footer.
+  Minimal margins. Renders inside the parent AccountRecord block.
+
+  COLUMN WIDTHS (must sum to 8.0in):
+    Date:     0.985in
+    Type:     1.089in
+    Channel:  0.596in
+    Terminal: 0.674in
+    Card:     0.641in
+    Amount:   0.580in
+    Fee:      0.432in
+    PrevBal:  0.746in
+    PostBal:  0.771in
+    Ref:      0.747in
+    Status:   0.739in
+    Total:    8.000in ✓
+
+  PII: card_number_redacted is last-4 format from DB. No full PAN. No customer name. No phone.
+-->
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+
+  <AutoRefresh>0</AutoRefresh>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <Language>en-US</Language>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+
+  <!-- ══════════════════════════════════════════════════════════════════
+       DATA SOURCE
+  ═══════════════════════════════════════════════════════════════════ -->
+  <DataSources>
+    <DataSource Name="GTW_GiftCards_DS">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=&lt;sql-server-hostname&gt;;Initial Catalog=GiftCards;Integrated Security=True;ApplicationIntent=ReadOnly</ConnectString>
+        <IntegratedSecurity>true</IntegratedSecurity>
+      </ConnectionProperties>
+      <rd:SecurityType>Integrated</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+
+  <!-- ══════════════════════════════════════════════════════════════════
+       DATASET — dsTransactions
+  ═══════════════════════════════════════════════════════════════════ -->
+  <DataSets>
+    <DataSet Name="dsTransactions">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_customer_account_inquiry_transactions</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@gift_card_account_id">
+            <Value>=Parameters!gift_card_account_id.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@top_n">
+            <Value>=Parameters!top_n.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@organization_timezone">
+            <Value>=Parameters!organization_timezone.Value</Value>
+          </QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="transaction_id"><DataField>transaction_id</DataField></Field>
+        <Field Name="transaction_reference_number"><DataField>transaction_reference_number</DataField></Field>
+        <Field Name="transaction_date_local"><DataField>transaction_date_local</DataField></Field>
+        <Field Name="transaction_type_name"><DataField>transaction_type_name</DataField></Field>
+        <Field Name="transaction_channel_name"><DataField>transaction_channel_name</DataField></Field>
+        <Field Name="terminal_name"><DataField>terminal_name</DataField></Field>
+        <Field Name="card_number_redacted"><DataField>card_number_redacted</DataField></Field>
+        <Field Name="amount"><DataField>amount</DataField></Field>
+        <Field Name="fee"><DataField>fee</DataField></Field>
+        <Field Name="effective_amount"><DataField>effective_amount</DataField></Field>
+        <Field Name="previous_balance"><DataField>previous_balance</DataField></Field>
+        <Field Name="post_balance"><DataField>post_balance</DataField></Field>
+        <Field Name="transaction_status_name"><DataField>transaction_status_name</DataField></Field>
+      </Fields>
+    </DataSet>
+  </DataSets>
+
+  <!-- ══════════════════════════════════════════════════════════════════
+       PARAMETERS (3 — received from parent report)
+  ═══════════════════════════════════════════════════════════════════ -->
+  <ReportParameters>
+
+    <ReportParameter Name="gift_card_account_id">
+      <DataType>Integer</DataType>
+      <Prompt>Account ID</Prompt>
+      <Hidden>true</Hidden>
+      <Nullable>false</Nullable>
+    </ReportParameter>
+
+    <ReportParameter Name="top_n">
+      <DataType>Integer</DataType>
+      <Prompt>Max Rows</Prompt>
+      <Hidden>true</Hidden>
+      <Nullable>false</Nullable>
+      <DefaultValue>
+        <Values><Value>20</Value></Values>
+      </DefaultValue>
+    </ReportParameter>
+
+    <ReportParameter Name="organization_timezone">
+      <DataType>Integer</DataType>
+      <Prompt>Timezone Offset</Prompt>
+      <Hidden>true</Hidden>
+      <Nullable>false</Nullable>
+      <DefaultValue>
+        <Values><Value>0</Value></Values>
+      </DefaultValue>
+    </ReportParameter>
+
+  </ReportParameters>
+
+  <!-- ══════════════════════════════════════════════════════════════════
+       REPORT SECTIONS
+       No PageHeader. No PageFooter. Minimal margins.
+  ═══════════════════════════════════════════════════════════════════ -->
+  <ReportSections>
+    <ReportSection>
+
+      <Page>
+        <PageHeight>11in</PageHeight>
+        <PageWidth>8.5in</PageWidth>
+        <LeftMargin>0.05in</LeftMargin>
+        <RightMargin>0.05in</RightMargin>
+        <TopMargin>0.05in</TopMargin>
+        <BottomMargin>0.05in</BottomMargin>
+        <Style />
+      </Page>
+
+      <Body>
+        <Height>6in</Height>
+        <Width>8.0in</Width>
+        <ReportItems>
+
+          <!-- ─────────────────────────────────────────────────────────
+               TxnSection — wrapping Rectangle (per skill rule: Tablix
+               must always be inside a Rectangle)
+          ──────────────────────────────────────────────────────────── -->
+          <Rectangle Name="TxnSection">
+            <Left>0in</Left><Top>0in</Top>
+            <Width>8.0in</Width>
+            <Style>
+              <Border><Style>None</Style></Border>
+            </Style>
+            <ReportItems>
+
+              <!-- ── TableTransactions ── 11-column transaction history grid -->
+              <Tablix Name="TableTransactions">
+                <DataSetName>dsTransactions</DataSetName>
+                <Left>0in</Left><Top>0in</Top>
+                <Width>8.0in</Width>
+                <NoRowsMessage>No transactions found for this account.</NoRowsMessage>
+
+                <TablixBody>
+                  <TablixColumns>
+                    <!-- Date/Time:   0.985in -->
+                    <TablixColumn><Width>0.985in</Width></TablixColumn>
+                    <!-- Type:        1.089in -->
+                    <TablixColumn><Width>1.089in</Width></TablixColumn>
+                    <!-- Channel:     0.596in -->
+                    <TablixColumn><Width>0.596in</Width></TablixColumn>
+                    <!-- Terminal:    0.674in -->
+                    <TablixColumn><Width>0.674in</Width></TablixColumn>
+                    <!-- Card #:      0.641in -->
+                    <TablixColumn><Width>0.641in</Width></TablixColumn>
+                    <!-- Amount:      0.580in -->
+                    <TablixColumn><Width>0.580in</Width></TablixColumn>
+                    <!-- Fee:         0.432in -->
+                    <TablixColumn><Width>0.432in</Width></TablixColumn>
+                    <!-- Prev Bal:    0.746in -->
+                    <TablixColumn><Width>0.746in</Width></TablixColumn>
+                    <!-- Post Bal:    0.771in -->
+                    <TablixColumn><Width>0.771in</Width></TablixColumn>
+                    <!-- Ref #:       0.747in -->
+                    <TablixColumn><Width>0.747in</Width></TablixColumn>
+                    <!-- Status:      0.739in -->
+                    <TablixColumn><Width>0.739in</Width></TablixColumn>
+                    <!-- TOTAL:       8.000in -->
+                  </TablixColumns>
+
+                  <TablixRows>
+
+                    <!-- ── HEADER ROW ── dark background, white bold text, repeats on page break -->
+                    <TablixRow>
+                      <Height>0.134in</Height>
+                      <TablixCells>
+
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Date_Header">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>Date / Time (Local)</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color></Style>
+                            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                            <Style><BackgroundColor>#333333</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Type_Header">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>Transaction Type</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color></Style>
+                            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                            <Style><BackgroundColor>#333333</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Channel_Header">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>Channel</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color></Style>
+                            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                            <Style><BackgroundColor>#333333</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Terminal_Header">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>Terminal</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color></Style>
+                            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                            <Style><BackgroundColor>#333333</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Card_Header">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>Card #</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color></Style>
+                            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                            <Style><BackgroundColor>#333333</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Amount_Header">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>Amount</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color></Style>
+                            </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                            <Style><BackgroundColor>#333333</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingRight>3pt</PaddingRight><Border><Style>None</Style></Border></Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Fee_Header">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>Fee</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color></Style>
+                            </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                            <Style><BackgroundColor>#333333</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingRight>3pt</PaddingRight><Border><Style>None</Style></Border></Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_PrevBal_Header">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>Prev. Balance</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color></Style>
+                            </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                            <Style><BackgroundColor>#333333</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingRight>3pt</PaddingRight><Border><Style>None</Style></Border></Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_PostBal_Header">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>Post Balance</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color></Style>
+                            </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                            <Style><BackgroundColor>#333333</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingRight>3pt</PaddingRight><Border><Style>None</Style></Border></Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Ref_Header">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>Ref #</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color></Style>
+                            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                            <Style><BackgroundColor>#333333</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Status_Header">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>Status</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color></Style>
+                            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                            <Style><BackgroundColor>#333333</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                      </TablixCells>
+                    </TablixRow>
+
+                    <!-- ── DETAIL ROW ── alternating row background, data bindings -->
+                    <TablixRow>
+                      <Height>0.119in</Height>
+                      <TablixCells>
+
+                        <!-- Date/Time Local -->
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Date_Detail">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>=Format(Fields!transaction_date_local.Value, "MM/dd/yyyy HH:mm")</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                            <Style>
+                              <BackgroundColor>=IIF(RowNumber("TableTransactions_Details") Mod 2 = 0, "#F2F8FE", "#FFFFFF")</BackgroundColor>
+                              <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                              <Border><Style>Solid</Style><Color>#DDDDDD</Color><Width>0.25pt</Width></Border>
+                            </Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <!-- Transaction Type -->
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Type_Detail">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>=Fields!transaction_type_name.Value</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                            <Style>
+                              <BackgroundColor>=IIF(RowNumber("TableTransactions_Details") Mod 2 = 0, "#F2F8FE", "#FFFFFF")</BackgroundColor>
+                              <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                              <Border><Style>Solid</Style><Color>#DDDDDD</Color><Width>0.25pt</Width></Border>
+                            </Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <!-- Channel -->
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Channel_Detail">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>=Fields!transaction_channel_name.Value</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                            <Style>
+                              <BackgroundColor>=IIF(RowNumber("TableTransactions_Details") Mod 2 = 0, "#F2F8FE", "#FFFFFF")</BackgroundColor>
+                              <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                              <Border><Style>Solid</Style><Color>#DDDDDD</Color><Width>0.25pt</Width></Border>
+                            </Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <!-- Terminal — null-guarded -->
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Terminal_Detail">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>=IIF(IsNothing(Fields!terminal_name.Value), "—", Fields!terminal_name.Value)</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                            <Style>
+                              <BackgroundColor>=IIF(RowNumber("TableTransactions_Details") Mod 2 = 0, "#F2F8FE", "#FFFFFF")</BackgroundColor>
+                              <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                              <Border><Style>Solid</Style><Color>#DDDDDD</Color><Width>0.25pt</Width></Border>
+                            </Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <!-- Card # — null-guarded, redacted format from DB -->
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Card_Detail">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>=IIF(IsNothing(Fields!card_number_redacted.Value), "—", Fields!card_number_redacted.Value)</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                            <Style>
+                              <BackgroundColor>=IIF(RowNumber("TableTransactions_Details") Mod 2 = 0, "#F2F8FE", "#FFFFFF")</BackgroundColor>
+                              <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                              <Border><Style>Solid</Style><Color>#DDDDDD</Color><Width>0.25pt</Width></Border>
+                            </Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <!-- Amount — color by effective_amount sign, Bold -->
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Amount_Detail">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>=IIF(IsNothing(Fields!amount.Value), "$0.00", "$" &amp; Format(Fields!amount.Value, "#,##0.00"))</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight>
+                                <Color>=IIF(Fields!effective_amount.Value >= 0, "#375623", "#C45911")</Color>
+                              </Style>
+                            </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                            <Style>
+                              <BackgroundColor>=IIF(RowNumber("TableTransactions_Details") Mod 2 = 0, "#F2F8FE", "#FFFFFF")</BackgroundColor>
+                              <VerticalAlign>Middle</VerticalAlign><PaddingRight>3pt</PaddingRight>
+                              <Border><Style>Solid</Style><Color>#DDDDDD</Color><Width>0.25pt</Width></Border>
+                            </Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <!-- Fee — muted colour -->
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Fee_Detail">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>=IIF(IsNothing(Fields!fee.Value), "$0.00", "$" &amp; Format(Fields!fee.Value, "#,##0.00"))</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color></Style>
+                            </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                            <Style>
+                              <BackgroundColor>=IIF(RowNumber("TableTransactions_Details") Mod 2 = 0, "#F2F8FE", "#FFFFFF")</BackgroundColor>
+                              <VerticalAlign>Middle</VerticalAlign><PaddingRight>3pt</PaddingRight>
+                              <Border><Style>Solid</Style><Color>#DDDDDD</Color><Width>0.25pt</Width></Border>
+                            </Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <!-- Prev Balance — null-safe -->
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_PrevBal_Detail">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>="$" &amp; Format(IIF(IsNothing(Fields!previous_balance.Value), 0, Fields!previous_balance.Value), "#,##0.00")</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                            </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                            <Style>
+                              <BackgroundColor>=IIF(RowNumber("TableTransactions_Details") Mod 2 = 0, "#F2F8FE", "#FFFFFF")</BackgroundColor>
+                              <VerticalAlign>Middle</VerticalAlign><PaddingRight>3pt</PaddingRight>
+                              <Border><Style>Solid</Style><Color>#DDDDDD</Color><Width>0.25pt</Width></Border>
+                            </Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <!-- Post Balance — null-safe -->
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_PostBal_Detail">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>="$" &amp; Format(IIF(IsNothing(Fields!post_balance.Value), 0, Fields!post_balance.Value), "#,##0.00")</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                            </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                            <Style>
+                              <BackgroundColor>=IIF(RowNumber("TableTransactions_Details") Mod 2 = 0, "#F2F8FE", "#FFFFFF")</BackgroundColor>
+                              <VerticalAlign>Middle</VerticalAlign><PaddingRight>3pt</PaddingRight>
+                              <Border><Style>Solid</Style><Color>#DDDDDD</Color><Width>0.25pt</Width></Border>
+                            </Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <!-- Ref # — null-guarded, muted -->
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Ref_Detail">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>=IIF(IsNothing(Fields!transaction_reference_number.Value), "—", Fields!transaction_reference_number.Value)</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color></Style>
+                            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                            <Style>
+                              <BackgroundColor>=IIF(RowNumber("TableTransactions_Details") Mod 2 = 0, "#F2F8FE", "#FFFFFF")</BackgroundColor>
+                              <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                              <Border><Style>Solid</Style><Color>#DDDDDD</Color><Width>0.25pt</Width></Border>
+                            </Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                        <!-- Status -->
+                        <TablixCell><CellContents>
+                          <Textbox Name="TableTransactions_Status_Detail">
+                            <Paragraphs><Paragraph><TextRuns><TextRun>
+                              <Value>=Fields!transaction_status_name.Value</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                            <Style>
+                              <BackgroundColor>=IIF(RowNumber("TableTransactions_Details") Mod 2 = 0, "#F2F8FE", "#FFFFFF")</BackgroundColor>
+                              <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                              <Border><Style>Solid</Style><Color>#DDDDDD</Color><Width>0.25pt</Width></Border>
+                            </Style>
+                            <CanGrow>true</CanGrow>
+                          </Textbox>
+                        </CellContents></TablixCell>
+
+                      </TablixCells>
+                    </TablixRow>
+
+                  </TablixRows>
+                </TablixBody>
+
+                <!-- TablixCorner required by rdl-tablix-patterns.md mandatory checklist -->
+                <TablixCorner />
+
+                <!-- Column hierarchy — 11 members, one per column, no grouping -->
+                <TablixColumnHierarchy>
+                  <TablixMembers>
+                    <TablixMember />
+                    <TablixMember />
+                    <TablixMember />
+                    <TablixMember />
+                    <TablixMember />
+                    <TablixMember />
+                    <TablixMember />
+                    <TablixMember />
+                    <TablixMember />
+                    <TablixMember />
+                    <TablixMember />
+                  </TablixMembers>
+                </TablixColumnHierarchy>
+
+                <!-- Row hierarchy — header member (RepeatOnNewPage) + detail member -->
+                <TablixRowHierarchy>
+                  <TablixMembers>
+                    <!-- Header member: repeats on page break, keeps with first detail row -->
+                    <TablixMember>
+                      <KeepWithGroup>After</KeepWithGroup>
+                      <RepeatOnNewPage>true</RepeatOnNewPage>
+                      <KeepTogether>true</KeepTogether>
+                    </TablixMember>
+                    <!-- Detail member: one row per transaction -->
+                    <TablixMember>
+                      <Group Name="TableTransactions_Details">
+                        <DataGroupName>TableTransactions_Details</DataGroupName>
+                      </Group>
+                    </TablixMember>
+                  </TablixMembers>
+                </TablixRowHierarchy>
+
+                <Style><Border><Style>None</Style></Border></Style>
+              </Tablix>
+
+              <!-- ── TxnRowCount ── row count footer bar below tablix -->
+              <Rectangle Name="TxnRowCount">
+                <Left>0in</Left><Top>0.3in</Top>
+                <Width>8.0in</Width><Height>0.104in</Height>
+                <Style>
+                  <BackgroundColor>#EEEEEE</BackgroundColor>
+                  <Border><Style>None</Style></Border>
+                </Style>
+                <ReportItems>
+                  <Textbox Name="TxnRowCount_Label">
+                    <Left>0in</Left><Top>0.012in</Top>
+                    <Width>8.0in</Width><Height>0.08in</Height>
+                    <Paragraphs><Paragraph><TextRuns><TextRun>
+                      <Value>="Showing last " &amp; CountRows("dsTransactions") &amp; " transactions  ·  Ordered by date descending"</Value>
+                      <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#555555</Color></Style>
+                    </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                    <Style>
+                      <VerticalAlign>Middle</VerticalAlign>
+                      <PaddingLeft>4pt</PaddingLeft>
+                      <Border><Style>None</Style></Border>
+                    </Style>
+                    <CanGrow>true</CanGrow>
+                  </Textbox>
+                </ReportItems>
+              </Rectangle>
+
+            </ReportItems>
+          </Rectangle>
+
+        </ReportItems>
+        <Style />
+      </Body>
+
+    </ReportSection>
+  </ReportSections>
+
+</Report>

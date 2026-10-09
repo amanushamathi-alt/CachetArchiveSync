@@ -1,0 +1,1285 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  RPT-010 — Customer Account Inquiry (Main Report)
+  SSRS Report Definition Language (RDL 2016)
+  Spec:   coding-agent/specs/web-reports/RPT-010-customer-account-inquiry.md
+  Design: reports-ui-design/RPT-010-Customer-Account-Inquiry.svg
+  Deploy to: /GTW/GiftCards/RPT-010-Customer-Account-Inquiry.rdl
+  Data source: GTW_GiftCards_DS  (Windows Auth S2S, GiftCards DB, ReadOnly)
+
+  PII CONTROLS:
+    - pan_hash / first_name_hash / last_name_hash / id_number_hash are Hidden parameters
+      and are NEVER rendered in any Textbox expression.
+    - customer_display = first_name + ' ' + last_initial + '.' only (no full last name).
+    - phone_last4 is displayed as "***-***-XXXX" only.
+    - card_number_redacted is displayed as stored (last-4 format from DB).
+    - No Vault JOIN. No raw PAN. No DOB. No full phone. (PCI DSS Req 3 / HIPAA)
+
+  SECURITY:
+    - Role gate (Owner role_id=8 / Supervisor role_id=9 / GTW Admin) enforced by calling portal (EF-4).
+    - Org isolation enforced by SP BR-1; this RDL trusts the parameter.
+    - SSRS Windows Authentication (S2S). All renders logged to ExecutionLog3.
+-->
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+
+  <AutoRefresh>0</AutoRefresh>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <Language>en-US</Language>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+
+  <!-- ══════════════════════════════════════════════════════════════════
+       DATA SOURCE  — configure connection string before deployment
+  ═══════════════════════════════════════════════════════════════════ -->
+  <DataSources>
+    <DataSource Name="GTW_GiftCards_DS">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=&lt;sql-server-hostname&gt;;Initial Catalog=GiftCards;Integrated Security=True;ApplicationIntent=ReadOnly</ConnectString>
+        <IntegratedSecurity>true</IntegratedSecurity>
+      </ConnectionProperties>
+      <rd:SecurityType>Integrated</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+
+  <!-- ══════════════════════════════════════════════════════════════════
+       DATASETS  (4 in main report — dsTransactions lives in subreport)
+  ═══════════════════════════════════════════════════════════════════ -->
+  <DataSets>
+
+    <!-- ── dsAccountInquiry ── main customer/account/card grid ─── -->
+    <DataSet Name="dsAccountInquiry">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_customer_account_inquiry</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id">
+            <Value>=Parameters!organization_id.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@operator_id">
+            <Value>=Parameters!operator_id.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@pan_hash">
+            <Value>=Parameters!pan_hash.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@first_name_hash">
+            <Value>=Parameters!first_name_hash.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@last_name_hash">
+            <Value>=Parameters!last_name_hash.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@id_number_hash">
+            <Value>=Parameters!id_number_hash.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@customer_status_ids">
+            <Value>=IIF(Parameters!customer_status_ids.Count = 0, Nothing, Join(Parameters!customer_status_ids.Value, ","))</Value>
+          </QueryParameter>
+          <QueryParameter Name="@card_status_ids">
+            <Value>=IIF(Parameters!card_status_ids.Count = 0, Nothing, Join(Parameters!card_status_ids.Value, ","))</Value>
+          </QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="customer_id"><DataField>customer_id</DataField></Field>
+        <Field Name="customer_number"><DataField>customer_number</DataField></Field>
+        <Field Name="customer_display"><DataField>customer_display</DataField></Field>
+        <Field Name="phone_last4"><DataField>phone_last4</DataField></Field>
+        <Field Name="customer_status"><DataField>customer_status</DataField></Field>
+        <Field Name="registration_location"><DataField>registration_location</DataField></Field>
+        <Field Name="organization_name"><DataField>organization_name</DataField></Field>
+        <Field Name="member_since"><DataField>member_since</DataField></Field>
+        <Field Name="gift_card_account_id"><DataField>gift_card_account_id</DataField></Field>
+        <Field Name="account_number"><DataField>account_number</DataField></Field>
+        <Field Name="current_balance"><DataField>current_balance</DataField></Field>
+        <Field Name="max_balance"><DataField>max_balance</DataField></Field>
+        <Field Name="account_status"><DataField>account_status</DataField></Field>
+        <Field Name="last_activity_date"><DataField>last_activity_date</DataField></Field>
+        <Field Name="card_number_redacted"><DataField>card_number_redacted</DataField></Field>
+        <Field Name="card_type"><DataField>card_type</DataField></Field>
+        <Field Name="card_status"><DataField>card_status</DataField></Field>
+        <Field Name="card_issued_date"><DataField>card_issued_date</DataField></Field>
+        <Field Name="card_expiry_date"><DataField>card_expiry_date</DataField></Field>
+        <Field Name="has_multiple_accounts"><DataField>has_multiple_accounts</DataField></Field>
+        <Field Name="has_id_on_file"><DataField>has_id_on_file</DataField></Field>
+        <Field Name="id_document_type"><DataField>id_document_type</DataField></Field>
+        <Field Name="has_phone_verified"><DataField>has_phone_verified</DataField></Field>
+        <Field Name="has_kyc_completed"><DataField>has_kyc_completed</DataField></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- ── dsOperators ── P2 operator cascading dropdown ────────── -->
+    <DataSet Name="dsOperators">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_operators_lst</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id">
+            <Value>=Parameters!organization_id.Value</Value>
+          </QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="operator_id"><DataField>operator_id</DataField></Field>
+        <Field Name="display_name"><DataField>display_name</DataField></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- ── dsCustomerStatuses ── P6 multi-value checklist ────────── -->
+    <DataSet Name="dsCustomerStatuses">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandText>SELECT status_id, status AS status_name FROM mst.gift_card_customer_status WHERE is_active = 1 ORDER BY status_id</CommandText>
+      </Query>
+      <Fields>
+        <Field Name="status_id"><DataField>status_id</DataField></Field>
+        <Field Name="status_name"><DataField>status_name</DataField></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- ── dsCardStatuses ── P7 multi-value checklist ─────────────── -->
+    <DataSet Name="dsCardStatuses">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandText>SELECT card_status_id, card_status_name FROM mst.card_status ORDER BY card_status_id</CommandText>
+      </Query>
+      <Fields>
+        <Field Name="card_status_id"><DataField>card_status_id</DataField></Field>
+        <Field Name="card_status_name"><DataField>card_status_name</DataField></Field>
+      </Fields>
+    </DataSet>
+
+  </DataSets>
+
+  <!-- ══════════════════════════════════════════════════════════════════
+       REPORT PARAMETERS  (8 parameters — §6 of spec)
+       SECURITY: hash params (P3/P4a/P4b/P5) are Hidden=true.
+       Hash values are NEVER rendered in any Textbox.
+  ═══════════════════════════════════════════════════════════════════ -->
+  <ReportParameters>
+
+    <!-- P1: organization_id — visible dropdown -->
+    <ReportParameter Name="organization_id">
+      <DataType>Integer</DataType>
+      <Prompt>Organisation</Prompt>
+      <Hidden>false</Hidden>
+      <Nullable>true</Nullable>
+    </ReportParameter>
+
+    <!-- P2: operator_id — cascades from P1 -->
+    <ReportParameter Name="operator_id">
+      <DataType>Integer</DataType>
+      <Prompt>Location</Prompt>
+      <Hidden>false</Hidden>
+      <Nullable>true</Nullable>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsOperators</DataSetName>
+          <ValueField>operator_id</ValueField>
+          <LabelField>display_name</LabelField>
+        </DataSetReference>
+      </ValidValues>
+    </ReportParameter>
+
+    <!-- P3: pan_hash — HIDDEN, passed via URL only. NEVER rendered. -->
+    <ReportParameter Name="pan_hash">
+      <DataType>String</DataType>
+      <Prompt>PAN Hash</Prompt>
+      <Hidden>true</Hidden>
+      <Nullable>true</Nullable>
+    </ReportParameter>
+
+    <!-- P4a: first_name_hash — HIDDEN, passed via URL only. NEVER rendered. -->
+    <ReportParameter Name="first_name_hash">
+      <DataType>String</DataType>
+      <Prompt>First Name Hash</Prompt>
+      <Hidden>true</Hidden>
+      <Nullable>true</Nullable>
+    </ReportParameter>
+
+    <!-- P4b: last_name_hash — HIDDEN, passed via URL only. NEVER rendered. -->
+    <ReportParameter Name="last_name_hash">
+      <DataType>String</DataType>
+      <Prompt>Last Name Hash</Prompt>
+      <Hidden>true</Hidden>
+      <Nullable>true</Nullable>
+    </ReportParameter>
+
+    <!-- P5: id_number_hash — HIDDEN, passed via URL only. NEVER rendered. -->
+    <ReportParameter Name="id_number_hash">
+      <DataType>String</DataType>
+      <Prompt>ID Number Hash</Prompt>
+      <Hidden>true</Hidden>
+      <Nullable>true</Nullable>
+    </ReportParameter>
+
+    <!-- P6: customer_status_ids — visible multi-value checklist -->
+    <ReportParameter Name="customer_status_ids">
+      <DataType>Integer</DataType>
+      <MultiValue>true</MultiValue>
+      <Prompt>Customer Status</Prompt>
+      <Hidden>false</Hidden>
+      <Nullable>true</Nullable>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsCustomerStatuses</DataSetName>
+          <ValueField>status_id</ValueField>
+          <LabelField>status_name</LabelField>
+        </DataSetReference>
+      </ValidValues>
+    </ReportParameter>
+
+    <!-- P7: card_status_ids — visible multi-value checklist -->
+    <ReportParameter Name="card_status_ids">
+      <DataType>Integer</DataType>
+      <MultiValue>true</MultiValue>
+      <Prompt>Card Status</Prompt>
+      <Hidden>false</Hidden>
+      <Nullable>true</Nullable>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsCardStatuses</DataSetName>
+          <ValueField>card_status_id</ValueField>
+          <LabelField>card_status_name</LabelField>
+        </DataSetReference>
+      </ValidValues>
+    </ReportParameter>
+
+    <!-- P8: transaction_rows_max — visible dropdown [10, 20, 50, 100] -->
+    <ReportParameter Name="transaction_rows_max">
+      <DataType>Integer</DataType>
+      <Prompt>Max Transactions</Prompt>
+      <Hidden>false</Hidden>
+      <Nullable>false</Nullable>
+      <DefaultValue>
+        <Values><Value>20</Value></Values>
+      </DefaultValue>
+      <ValidValues>
+        <ParameterValues>
+          <ParameterValue><Value>10</Value><Label>10</Label></ParameterValue>
+          <ParameterValue><Value>20</Value><Label>20</Label></ParameterValue>
+          <ParameterValue><Value>50</Value><Label>50</Label></ParameterValue>
+          <ParameterValue><Value>100</Value><Label>100</Label></ParameterValue>
+        </ParameterValues>
+      </ValidValues>
+    </ReportParameter>
+
+  </ReportParameters>
+
+  <!-- ══════════════════════════════════════════════════════════════════
+       REPORT SECTIONS
+  ═══════════════════════════════════════════════════════════════════ -->
+  <ReportSections>
+    <ReportSection>
+
+      <!-- ════════════════════════════════════════════════════════════
+           PAGE SETUP  — Letter, Portrait, 0.25in margins all sides
+      ═══════════════════════════════════════════════════════════════ -->
+      <Page>
+
+        <!-- PAGE FOOTER — dark band, CONFIDENTIAL text, every page -->
+        <PageFooter>
+          <Height>0.2in</Height>
+          <PrintOnFirstPage>true</PrintOnFirstPage>
+          <PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+
+            <Rectangle Name="rectFooterBg">
+              <Left>0in</Left><Top>0in</Top>
+              <Width>8.0in</Width><Height>0.2in</Height>
+              <Style>
+                <BackgroundColor>#1A1A1A</BackgroundColor>
+                <Border><Style>None</Style></Border>
+              </Style>
+            </Rectangle>
+
+            <Textbox Name="Footer_PageNum">
+              <Left>0.05in</Left><Top>0.02in</Top>
+              <Width>1.5in</Width><Height>0.16in</Height>
+              <ZIndex>1</ZIndex>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>="Page " &amp; Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value>
+                <Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#AAAAAA</Color></Style>
+              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+            <Textbox Name="Footer_Confidential">
+              <Left>1.8in</Left><Top>0.02in</Top>
+              <Width>4.4in</Width><Height>0.16in</Height>
+              <ZIndex>1</ZIndex>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>CONFIDENTIAL — This report contains minimised PII. Not for public disclosure.</Value>
+                <Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#CCCCCC</Color></Style>
+              </TextRun></TextRuns><Style><TextAlign>Center</TextAlign></Style></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+            <Textbox Name="Footer_ReportID">
+              <Left>6.4in</Left><Top>0.02in</Top>
+              <Width>1.55in</Width><Height>0.16in</Height>
+              <ZIndex>1</ZIndex>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>RPT-010 v1.0  ·  GTW Gift Card System</Value>
+                <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#888888</Color></Style>
+              </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+          </ReportItems>
+          <Style />
+        </PageFooter>
+
+        <PageHeight>11in</PageHeight>
+        <PageWidth>8.5in</PageWidth>
+        <LeftMargin>0.25in</LeftMargin>
+        <RightMargin>0.25in</RightMargin>
+        <TopMargin>0.25in</TopMargin>
+        <BottomMargin>0.25in</BottomMargin>
+        <Style />
+      </Page>
+
+      <!-- ════════════════════════════════════════════════════════════
+           BODY
+           Direct body children (per tracecounts-rdl-state.md convention):
+             1. ReportHeader     (Rectangle)
+             2. AccountList      (Tablix  — List pattern, dsAccountInquiry)
+             3. NoResultsMsg     (Rectangle — visible only on 0 rows)
+           Usable body width: 8.0in
+      ═══════════════════════════════════════════════════════════════ -->
+      <Body>
+        <Height>14in</Height>
+        <Width>8.0in</Width>
+        <ReportItems>
+
+          <!-- ─────────────────────────────────────────────────────────
+               1. REPORT HEADER RECTANGLE
+               Dark band with title, org/location line, search criteria,
+               generated timestamp, user, report ID.
+               Height: 72px → 72/96 = 0.75in (using standard 96dpi for body header)
+               NOTE: per task spec, header is 0.537in. Using spec value.
+          ──────────────────────────────────────────────────────────── -->
+          <Rectangle Name="ReportHeader">
+            <Left>0in</Left><Top>0in</Top>
+            <Width>8.0in</Width><Height>0.537in</Height>
+            <Style>
+              <BackgroundColor>#1A1A1A</BackgroundColor>
+              <Border><Style>None</Style></Border>
+            </Style>
+            <ReportItems>
+
+              <Textbox Name="Header_Title">
+                <Left>0.089in</Left><Top>0.0in</Top>
+                <Width>4.0in</Width><Height>0.16in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>Customer Account Inquiry</Value>
+                  <Style><FontFamily>Calibri</FontFamily><FontSize>10pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <Textbox Name="Header_OrgLine">
+                <Left>0.089in</Left><Top>0.18in</Top>
+                <Width>5.5in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>="Organisation: " &amp; IIF(IsNothing(Parameters!organization_id.Value), "(All Organisations)", First(Fields!organization_name.Value, "dsAccountInquiry")) &amp; "  ·  Location: " &amp; IIF(IsNothing(Parameters!operator_id.Value), "(All Locations)", First(Fields!registration_location.Value, "dsAccountInquiry"))</Value>
+                  <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#AAAAAA</Color></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <Textbox Name="Header_SearchLine">
+                <Left>0.089in</Left><Top>0.313in</Top>
+                <Width>5.5in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>=IIF(NOT IsNothing(Parameters!pan_hash.Value), "Search: PAN Supplied (hashed)", IIF(NOT IsNothing(Parameters!first_name_hash.Value), "Search: Customer Name Supplied (hashed)", IIF(NOT IsNothing(Parameters!id_number_hash.Value), "Search: ID Number Supplied (hashed)", "[No search criteria]")))</Value>
+                  <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#888888</Color></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <Textbox Name="Header_Generated">
+                <Left>4.5in</Left><Top>0.0in</Top>
+                <Width>3.5in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>="Generated: " &amp; Format(Globals!ExecutionTime, "MM/dd/yyyy HH:mm") &amp; " UTC"</Value>
+                  <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#AAAAAA</Color></Style>
+                </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <Textbox Name="Header_User">
+                <Left>4.5in</Left><Top>0.18in</Top>
+                <Width>3.5in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>="By: " &amp; User!UserID</Value>
+                  <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#AAAAAA</Color></Style>
+                </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <Textbox Name="Header_ReportIDLine">
+                <Left>4.5in</Left><Top>0.313in</Top>
+                <Width>3.5in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>Report ID: RPT-010  ·  SSRS Web Portal</Value>
+                  <Style><FontFamily>Calibri</FontFamily><FontSize>6.5pt</FontSize><Color>#888888</Color></Style>
+                </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+            </ReportItems>
+          </Rectangle>
+
+          <!-- ─────────────────────────────────────────────────────────
+               2. ACCOUNT LIST CONTAINER — skills requirement:
+               all new Tablix elements must be inside a Rectangle
+               (svg-to-rdl.md layout rule + tracecounts-rdl-state.md).
+               AccountList Tablix is positioned at 0/0 relative to this.
+          ──────────────────────────────────────────────────────────── -->
+          <Rectangle Name="AccountListContainer">
+            <Left>0in</Left><Top>0.6in</Top>
+            <Width>8.0in</Width><Height>4.2in</Height>
+            <KeepTogether>false</KeepTogether>
+            <Style><Border><Style>None</Style></Border></Style>
+            <ReportItems>
+
+          <Tablix Name="AccountList">
+            <DataSetName>dsAccountInquiry</DataSetName>
+            <Left>0in</Left><Top>0in</Top>
+            <Width>8.0in</Width>
+            <NoRowsMessage></NoRowsMessage>
+
+            <TablixBody>
+              <TablixColumns>
+                <!-- Single column — full width -->
+                <TablixColumn><Width>8.0in</Width></TablixColumn>
+              </TablixColumns>
+
+              <TablixRows>
+                <!-- Header row: 0.001in (structurally required by rdl-tablix-patterns.md;
+                     invisible — this is a List with no column headers) -->
+                <TablixRow>
+                  <Height>0.001in</Height>
+                  <TablixCells>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="AccountList_EmptyHeader">
+                          <Paragraphs><Paragraph><TextRuns><TextRun>
+                            <Value></Value>
+                          </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                          <Style><Border><Style>None</Style></Border></Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+                <!-- One detail row — auto-height via inner content -->
+                <TablixRow>
+                  <Height>4.2in</Height>
+                  <TablixCells>
+                    <TablixCell>
+                      <CellContents>
+
+                        <!-- AccountRecord: outer container per customer -->
+                        <Rectangle Name="AccountRecord">
+                          <Left>0in</Left><Top>0in</Top>
+                          <Width>8.0in</Width>
+                          <Style>
+                            <Border><Style>None</Style></Border>
+                          </Style>
+                          <ReportItems>
+
+                            <!-- ── A. CustomerSeparatorBar ── -->
+                            <Rectangle Name="CustomerSeparatorBar">
+                              <Left>0in</Left><Top>0in</Top>
+                              <Width>8.0in</Width><Height>0.164in</Height>
+                              <Style>
+                                <BackgroundColor>#1A1A1A</BackgroundColor>
+                                <Border><Style>None</Style></Border>
+                              </Style>
+                              <ReportItems>
+
+                                <Textbox Name="Sep_CustomerLabel">
+                                  <Left>0.074in</Left><Top>0.022in</Top>
+                                  <Width>4.0in</Width><Height>0.12in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>="Customer Record  —  " &amp; Fields!customer_number.Value</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <Textbox Name="Sep_AccountLabel">
+                                  <Left>6.0in</Left><Top>0.022in</Top>
+                                  <Width>2.0in</Width><Height>0.12in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>="Account: " &amp; Fields!account_number.Value</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>6.5pt</FontSize><Color>#AAAAAA</Color></Style>
+                                  </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                              </ReportItems>
+                            </Rectangle>
+
+                            <!-- ── B. CustomerProfilePanel ── Left panel, row 1 -->
+                            <Rectangle Name="CustomerProfilePanel">
+                              <Left>0in</Left><Top>0.177in</Top>
+                              <Width>3.85in</Width><Height>0.836in</Height>
+                              <Style>
+                                <BackgroundColor>#FFFFFF</BackgroundColor>
+                                <Border><Style>Solid</Style><Color>#C8DBF0</Color><Width>1pt</Width></Border>
+                              </Style>
+                              <ReportItems>
+
+                                <!-- Left accent bar -->
+                                <Rectangle Name="ProfileAccentBar">
+                                  <Left>0in</Left><Top>0in</Top>
+                                  <Width>0.037in</Width><Height>0.836in</Height>
+                                  <Style>
+                                    <BackgroundColor>#1A1A1A</BackgroundColor>
+                                    <Border><Style>None</Style></Border>
+                                  </Style>
+                                </Rectangle>
+
+                                <Textbox Name="PanelLabel_Profile">
+                                  <Left>0.112in</Left><Top>0.037in</Top>
+                                  <Width>3.0in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>CUSTOMER PROFILE</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#555555</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Name -->
+                                <Textbox Name="Profile_Name_Label">
+                                  <Left>0.112in</Left><Top>0.187in</Top>
+                                  <Width>0.65in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Name</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#777777</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Profile_Name_Value">
+                                  <Left>0.82in</Left><Top>0.187in</Top>
+                                  <Width>2.9in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=Fields!customer_display.Value</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Phone -->
+                                <Textbox Name="Profile_Phone_Label">
+                                  <Left>0.112in</Left><Top>0.29in</Top>
+                                  <Width>0.65in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Phone</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#777777</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Profile_Phone_Value">
+                                  <Left>0.82in</Left><Top>0.29in</Top>
+                                  <Width>2.9in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>="***-***-" &amp; Fields!phone_last4.Value</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Customer # -->
+                                <Textbox Name="Profile_CustNum_Label">
+                                  <Left>0.112in</Left><Top>0.42in</Top>
+                                  <Width>0.65in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Customer #</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#777777</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Profile_CustNum_Value">
+                                  <Left>0.82in</Left><Top>0.42in</Top>
+                                  <Width>2.9in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=Fields!customer_number.Value</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Status -->
+                                <Textbox Name="Profile_Status_Label">
+                                  <Left>0.112in</Left><Top>0.55in</Top>
+                                  <Width>0.65in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Status</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#777777</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Profile_Status_Value">
+                                  <Left>0.82in</Left><Top>0.55in</Top>
+                                  <Width>2.9in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=Fields!customer_status.Value</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Reg. Location -->
+                                <Textbox Name="Profile_RegLoc_Label">
+                                  <Left>0.112in</Left><Top>0.68in</Top>
+                                  <Width>0.65in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Reg. Location</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#777777</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Profile_RegLoc_Value">
+                                  <Left>0.82in</Left><Top>0.68in</Top>
+                                  <Width>2.9in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=Fields!registration_location.Value</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                              </ReportItems>
+                            </Rectangle>
+
+                            <!-- ── C. AccountSummaryPanel ── Right panel, row 1 -->
+                            <Rectangle Name="AccountSummaryPanel">
+                              <Left>4.0in</Left><Top>0.177in</Top>
+                              <Width>4.0in</Width><Height>0.836in</Height>
+                              <Style>
+                                <BackgroundColor>#FFFFFF</BackgroundColor>
+                                <Border><Style>Solid</Style><Color>#C8DBF0</Color><Width>1pt</Width></Border>
+                              </Style>
+                              <ReportItems>
+
+                                <!-- Left accent bar -->
+                                <Rectangle Name="AccountAccentBar">
+                                  <Left>0in</Left><Top>0in</Top>
+                                  <Width>0.037in</Width><Height>0.836in</Height>
+                                  <Style>
+                                    <BackgroundColor>#1A1A1A</BackgroundColor>
+                                    <Border><Style>None</Style></Border>
+                                  </Style>
+                                </Rectangle>
+
+                                <Textbox Name="PanelLabel_Account">
+                                  <Left>0.112in</Left><Top>0.037in</Top>
+                                  <Width>3.0in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>ACCOUNT SUMMARY</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#555555</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Account # -->
+                                <Textbox Name="Account_AcctNum_Label">
+                                  <Left>0.112in</Left><Top>0.15in</Top>
+                                  <Width>0.65in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Account #</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#777777</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Account_AcctNum_Value">
+                                  <Left>0.82in</Left><Top>0.15in</Top>
+                                  <Width>3.0in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=Fields!account_number.Value</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Current Balance — large, green -->
+                                <Textbox Name="Account_CurBal_Label">
+                                  <Left>0.112in</Left><Top>0.29in</Top>
+                                  <Width>0.65in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Current Balance</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#777777</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Account_CurBal_Value">
+                                  <Left>0.82in</Left><Top>0.29in</Top>
+                                  <Width>3.0in</Width><Height>0.16in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>="$" &amp; Format(Fields!current_balance.Value, "#,##0.00")</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>14pt</FontSize><FontWeight>Bold</FontWeight><Color>#375623</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Max Balance -->
+                                <Textbox Name="Account_MaxBal_Label">
+                                  <Left>0.112in</Left><Top>0.50in</Top>
+                                  <Width>0.65in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Max Balance</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#777777</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Account_MaxBal_Value">
+                                  <Left>0.82in</Left><Top>0.50in</Top>
+                                  <Width>3.0in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>="$" &amp; Format(Fields!max_balance.Value, "#,##0.00")</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Account Status -->
+                                <Textbox Name="Account_Status_Label">
+                                  <Left>0.112in</Left><Top>0.63in</Top>
+                                  <Width>0.65in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Account Status</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#777777</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Account_Status_Value">
+                                  <Left>0.82in</Left><Top>0.63in</Top>
+                                  <Width>3.0in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=Fields!account_status.Value</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Member Since -->
+                                <Textbox Name="Account_MemberSince_Label">
+                                  <Left>0.112in</Left><Top>0.75in</Top>
+                                  <Width>0.65in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Member Since</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#777777</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Account_MemberSince_Value">
+                                  <Left>0.82in</Left><Top>0.75in</Top>
+                                  <Width>3.0in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=Format(Fields!member_since.Value, "MM/dd/yyyy")</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                              </ReportItems>
+                            </Rectangle>
+
+                            <!-- ── D. CardDetailsPanel ── Left panel, row 2 -->
+                            <Rectangle Name="CardDetailsPanel">
+                              <Left>0in</Left><Top>1.043in</Top>
+                              <Width>3.85in</Width><Height>0.806in</Height>
+                              <Style>
+                                <BackgroundColor>#FFFFFF</BackgroundColor>
+                                <Border><Style>Solid</Style><Color>#C8DBF0</Color><Width>1pt</Width></Border>
+                              </Style>
+                              <ReportItems>
+
+                                <!-- Left accent bar — navy -->
+                                <Rectangle Name="CardAccentBar">
+                                  <Left>0in</Left><Top>0in</Top>
+                                  <Width>0.037in</Width><Height>0.806in</Height>
+                                  <Style>
+                                    <BackgroundColor>#1F3864</BackgroundColor>
+                                    <Border><Style>None</Style></Border>
+                                  </Style>
+                                </Rectangle>
+
+                                <Textbox Name="PanelLabel_Card">
+                                  <Left>0.112in</Left><Top>0.037in</Top>
+                                  <Width>3.0in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>CARD DETAILS</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#555555</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Card # -->
+                                <Textbox Name="Card_Num_Label">
+                                  <Left>0.112in</Left><Top>0.15in</Top>
+                                  <Width>0.65in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Card #</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#777777</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Card_Num_Value">
+                                  <Left>0.82in</Left><Top>0.15in</Top>
+                                  <Width>2.9in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=IIF(IsNothing(Fields!card_number_redacted.Value), "N/A", Fields!card_number_redacted.Value)</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Type -->
+                                <Textbox Name="Card_Type_Label">
+                                  <Left>0.112in</Left><Top>0.29in</Top>
+                                  <Width>0.65in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Type</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#777777</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Card_Type_Value">
+                                  <Left>0.82in</Left><Top>0.29in</Top>
+                                  <Width>2.9in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=IIF(IsNothing(Fields!card_type.Value), "N/A", Fields!card_type.Value)</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Status -->
+                                <Textbox Name="Card_Status_Label">
+                                  <Left>0.112in</Left><Top>0.42in</Top>
+                                  <Width>0.65in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Status</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#777777</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Card_Status_Value">
+                                  <Left>0.82in</Left><Top>0.42in</Top>
+                                  <Width>2.9in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=IIF(IsNothing(Fields!card_status.Value), "N/A", Fields!card_status.Value)</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Issued -->
+                                <Textbox Name="Card_Issued_Label">
+                                  <Left>0.112in</Left><Top>0.55in</Top>
+                                  <Width>0.65in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Issued</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#777777</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Card_Issued_Value">
+                                  <Left>0.82in</Left><Top>0.55in</Top>
+                                  <Width>2.9in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=IIF(IsNothing(Fields!card_issued_date.Value), "N/A", Format(Fields!card_issued_date.Value, "MM/dd/yyyy"))</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Expires -->
+                                <Textbox Name="Card_Expiry_Label">
+                                  <Left>0.112in</Left><Top>0.68in</Top>
+                                  <Width>0.65in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Expires</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#777777</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Card_Expiry_Value">
+                                  <Left>0.82in</Left><Top>0.68in</Top>
+                                  <Width>2.9in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=IIF(IsNothing(Fields!card_expiry_date.Value), "N/A", Format(Fields!card_expiry_date.Value, "MM/dd/yyyy"))</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                              </ReportItems>
+                            </Rectangle>
+
+                            <!-- ── E. VerificationStatusPanel ── Right panel, row 2 -->
+                            <Rectangle Name="VerificationStatusPanel">
+                              <Left>4.0in</Left><Top>1.043in</Top>
+                              <Width>4.0in</Width><Height>0.806in</Height>
+                              <Style>
+                                <BackgroundColor>#FFFFFF</BackgroundColor>
+                                <Border><Style>Solid</Style><Color>#C8DBF0</Color><Width>1pt</Width></Border>
+                              </Style>
+                              <ReportItems>
+
+                                <!-- Left accent bar -->
+                                <Rectangle Name="VerifAccentBar">
+                                  <Left>0in</Left><Top>0in</Top>
+                                  <Width>0.037in</Width><Height>0.806in</Height>
+                                  <Style>
+                                    <BackgroundColor>#1A1A1A</BackgroundColor>
+                                    <Border><Style>None</Style></Border>
+                                  </Style>
+                                </Rectangle>
+
+                                <Textbox Name="PanelLabel_Verification">
+                                  <Left>0.112in</Left><Top>0.037in</Top>
+                                  <Width>3.5in</Width><Height>0.1in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>VERIFICATION STATUS</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontWeight>Bold</FontWeight><Color>#555555</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Row 1: ID on File -->
+                                <Textbox Name="Verif_ID_Indicator">
+                                  <Left>0.112in</Left><Top>0.18in</Top>
+                                  <Width>0.15in</Width><Height>0.12in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=IIF(Fields!has_id_on_file.Value = 1, "✓", "✗")</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight>
+                                      <Color>=IIF(Fields!has_id_on_file.Value = 1, "#375623", "#C45911")</Color>
+                                    </Style>
+                                  </TextRun></TextRuns><Style><TextAlign>Center</TextAlign></Style></Paragraph></Paragraphs>
+                                  <Style>
+                                    <BackgroundColor>=IIF(Fields!has_id_on_file.Value = 1, "#E8F5E9", "#FEEDE5")</BackgroundColor>
+                                    <VerticalAlign>Middle</VerticalAlign>
+                                    <Border><Style>None</Style></Border>
+                                  </Style>
+                                  <CanGrow>false</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Verif_ID_Label">
+                                  <Left>0.28in</Left><Top>0.18in</Top>
+                                  <Width>1.0in</Width><Height>0.12in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>ID on File</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Verif_ID_Detail">
+                                  <Left>1.35in</Left><Top>0.18in</Top>
+                                  <Width>2.5in</Width><Height>0.12in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=IIF(Fields!has_id_on_file.Value = 1, IIF(IsNothing(Fields!id_document_type.Value), "On File", Fields!id_document_type.Value), "Not on file")</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Row 2: Phone Verified -->
+                                <Textbox Name="Verif_Phone_Indicator">
+                                  <Left>0.112in</Left><Top>0.33in</Top>
+                                  <Width>0.15in</Width><Height>0.12in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=IIF(Fields!has_phone_verified.Value = 1, "✓", "✗")</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight>
+                                      <Color>=IIF(Fields!has_phone_verified.Value = 1, "#375623", "#C45911")</Color>
+                                    </Style>
+                                  </TextRun></TextRuns><Style><TextAlign>Center</TextAlign></Style></Paragraph></Paragraphs>
+                                  <Style>
+                                    <BackgroundColor>=IIF(Fields!has_phone_verified.Value = 1, "#E8F5E9", "#FEEDE5")</BackgroundColor>
+                                    <VerticalAlign>Middle</VerticalAlign>
+                                    <Border><Style>None</Style></Border>
+                                  </Style>
+                                  <CanGrow>false</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Verif_Phone_Label">
+                                  <Left>0.28in</Left><Top>0.33in</Top>
+                                  <Width>1.0in</Width><Height>0.12in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>Phone Verified</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Verif_Phone_Detail">
+                                  <Left>1.35in</Left><Top>0.33in</Top>
+                                  <Width>2.5in</Width><Height>0.12in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=IIF(Fields!has_phone_verified.Value = 1, "Verified", "Not verified")</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Row 3: KYC Completed -->
+                                <Textbox Name="Verif_KYC_Indicator">
+                                  <Left>0.112in</Left><Top>0.48in</Top>
+                                  <Width>0.15in</Width><Height>0.12in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=IIF(Fields!has_kyc_completed.Value = 1, "✓", "✗")</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight>
+                                      <Color>=IIF(Fields!has_kyc_completed.Value = 1, "#375623", "#C45911")</Color>
+                                    </Style>
+                                  </TextRun></TextRuns><Style><TextAlign>Center</TextAlign></Style></Paragraph></Paragraphs>
+                                  <Style>
+                                    <BackgroundColor>=IIF(Fields!has_kyc_completed.Value = 1, "#E8F5E9", "#FEEDE5")</BackgroundColor>
+                                    <VerticalAlign>Middle</VerticalAlign>
+                                    <Border><Style>None</Style></Border>
+                                  </Style>
+                                  <CanGrow>false</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Verif_KYC_Label">
+                                  <Left>0.28in</Left><Top>0.48in</Top>
+                                  <Width>1.0in</Width><Height>0.12in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>KYC Completed</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#1A1A1A</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+                                <Textbox Name="Verif_KYC_Detail">
+                                  <Left>1.35in</Left><Top>0.48in</Top>
+                                  <Width>2.5in</Width><Height>0.12in</Height>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>=IIF(Fields!has_kyc_completed.Value = 1, "Completed", "Not completed")</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                                <!-- Multiple Accounts warning — visible only when has_multiple_accounts = 1 -->
+                                <Textbox Name="VerifNote_MultipleAccounts">
+                                  <Left>0.112in</Left><Top>0.63in</Top>
+                                  <Width>3.7in</Width><Height>0.1in</Height>
+                                  <Visibility>
+                                    <Hidden>=IIF(Fields!has_multiple_accounts.Value = 1, false, true)</Hidden>
+                                  </Visibility>
+                                  <Paragraphs><Paragraph><TextRuns><TextRun>
+                                    <Value>⚠ Multiple accounts on file</Value>
+                                    <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><FontStyle>Italic</FontStyle><Color>#833C00</Color></Style>
+                                  </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                                  <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                                  <CanGrow>true</CanGrow>
+                                </Textbox>
+
+                              </ReportItems>
+                            </Rectangle>
+
+                            <!-- ── F. TransactionHistoryLabel ── -->
+                            <Textbox Name="TransactionHistoryLabel">
+                              <Left>0in</Left><Top>1.887in</Top>
+                              <Width>8.0in</Width><Height>0.134in</Height>
+                              <Paragraphs><Paragraph><TextRuns><TextRun>
+                                <Value>="TRANSACTION HISTORY  (Last " &amp; Parameters!transaction_rows_max.Value &amp; " Transactions — account " &amp; Fields!account_number.Value &amp; ")"</Value>
+                                <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight><Color>#1A1A1A</Color></Style>
+                              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                              <Style>
+                                <BackgroundColor>#D6E4F0</BackgroundColor>
+                                <VerticalAlign>Middle</VerticalAlign>
+                                <PaddingLeft>5pt</PaddingLeft>
+                                <Border><Style>None</Style></Border>
+                              </Style>
+                              <CanGrow>true</CanGrow>
+                            </Textbox>
+
+                            <!-- ── G. TransactionSubreportItem ── -->
+                            <Subreport Name="TransactionSubreportItem">
+                              <Left>0in</Left><Top>2.045in</Top>
+                              <Width>8.0in</Width><Height>2.0in</Height>
+                              <ReportName>RPT-010-Transactions-Subreport</ReportName>
+                              <Parameters>
+                                <Parameter Name="gift_card_account_id">
+                                  <Value>=Fields!gift_card_account_id.Value</Value>
+                                </Parameter>
+                                <Parameter Name="top_n">
+                                  <Value>=Parameters!transaction_rows_max.Value</Value>
+                                </Parameter>
+                                <Parameter Name="organization_timezone">
+                                  <Value>0</Value>
+                                </Parameter>
+                              </Parameters>
+                              <Style>
+                                <Border><Style>None</Style></Border>
+                              </Style>
+                            </Subreport>
+
+                            <!-- ── H. CustomerSeparatorRule ── dashed line at bottom of record -->
+                            <Line Name="CustomerSeparatorRule">
+                              <Left>0in</Left><Top>4.1in</Top>
+                              <Width>8.0in</Width><Height>0in</Height>
+                              <Style>
+                                <Border>
+                                  <Style>Dashed</Style>
+                                  <Color>#1A1A1A</Color>
+                                  <Width>1pt</Width>
+                                </Border>
+                              </Style>
+                            </Line>
+
+                          </ReportItems>
+                        </Rectangle>
+
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+              </TablixRows>
+            </TablixBody>
+
+            <!-- TablixCorner required by rdl-tablix-patterns.md mandatory checklist -->
+            <TablixCorner />
+
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember />
+              </TablixMembers>
+            </TablixColumnHierarchy>
+
+            <!-- Header member required by rdl-tablix-patterns.md (List has no visible
+                 header row — 0.001in empty row satisfies the structural requirement) -->
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <TablixMember>
+                  <KeepWithGroup>After</KeepWithGroup>
+                  <RepeatOnNewPage>true</RepeatOnNewPage>
+                  <KeepTogether>true</KeepTogether>
+                </TablixMember>
+                <TablixMember>
+                  <Group Name="AccountList_Details">
+                    <DataGroupName>AccountList_Details</DataGroupName>
+                  </Group>
+                </TablixMember>
+              </TablixMembers>
+            </TablixRowHierarchy>
+
+            <Style><Border><Style>None</Style></Border></Style>
+          </Tablix>
+
+            </ReportItems>
+          </Rectangle>
+
+          <!-- ─────────────────────────────────────────────────────────
+               3. NO RESULTS MESSAGE
+               Shown only when dsAccountInquiry returns 0 rows.
+               Hidden = true when rows exist; shown when rows = 0.
+          ──────────────────────────────────────────────────────────── -->
+          <Rectangle Name="NoResultsMsg">
+            <Left>0in</Left><Top>0.6in</Top>
+            <Width>8.0in</Width><Height>0.45in</Height>
+            <Visibility>
+              <Hidden>=IIF(CountRows("dsAccountInquiry") > 0, true, false)</Hidden>
+            </Visibility>
+            <Style>
+              <BackgroundColor>#FFFFFF</BackgroundColor>
+              <Border><Style>Solid</Style><Color>#C8DBF0</Color><Width>1pt</Width></Border>
+            </Style>
+            <ReportItems>
+
+              <!-- Left accent — warning orange -->
+              <Rectangle Name="NoResults_AccentBar">
+                <Left>0in</Left><Top>0in</Top>
+                <Width>0.037in</Width><Height>0.45in</Height>
+                <Style>
+                  <BackgroundColor>#833C00</BackgroundColor>
+                  <Border><Style>None</Style></Border>
+                </Style>
+              </Rectangle>
+
+              <Textbox Name="NoResults_Title">
+                <Left>0.112in</Left><Top>0.037in</Top>
+                <Width>7.8in</Width><Height>0.14in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>No customer accounts found matching the provided search criteria.</Value>
+                  <Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#833C00</Color></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <Textbox Name="NoResults_Sub">
+                <Left>0.112in</Left><Top>0.22in</Top>
+                <Width>7.8in</Width><Height>0.14in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>Verify the PAN, customer name, or ID number entered and try again.</Value>
+                  <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+            </ReportItems>
+          </Rectangle>
+
+        </ReportItems>
+        <Style />
+      </Body>
+
+    </ReportSection>
+  </ReportSections>
+
+</Report>

@@ -1,0 +1,1086 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+
+  <AutoRefresh>0</AutoRefresh>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <Language>en-US</Language>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       DATA SOURCES
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <DataSources>
+    <DataSource Name="GTW_GiftCards_DS">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=&lt;sql-server-hostname&gt;;Initial Catalog=GiftCards;Integrated Security=True;ApplicationIntent=ReadOnly</ConnectString>
+        <IntegratedSecurity>true</IntegratedSecurity>
+      </ConnectionProperties>
+      <rd:SecurityType>Integrated</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       DATA SETS
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <DataSets>
+
+    <!-- dsKPI: gc.rpt_org_card_replacement_kpi — single summary row for Part A -->
+    <DataSet Name="dsKPI">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_card_replacement_kpi</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id">
+            <Value>=Parameters!organization_id.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@operator_ids">
+            <Value>=IIF(Parameters!operator_ids.Value Is Nothing, Nothing, Join(Parameters!operator_ids.Value, ","))</Value>
+          </QueryParameter>
+          <QueryParameter Name="@start_date">
+            <Value>=Parameters!start_date.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@end_date">
+            <Value>=Parameters!end_date.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@replacement_reasons">
+            <Value>=IIF(Parameters!replacement_reasons.Value Is Nothing, Nothing, Join(Parameters!replacement_reasons.Value, ","))</Value>
+          </QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="total_replacements"><DataField>total_replacements</DataField></Field>
+        <Field Name="lost_replacements"><DataField>lost_replacements</DataField></Field>
+        <Field Name="damaged_replacements"><DataField>damaged_replacements</DataField></Field>
+        <Field Name="renewal_replacements"><DataField>renewal_replacements</DataField></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsDetail: gc.rpt_org_card_replacement_detail — one row per replacement event -->
+    <DataSet Name="dsDetail">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_card_replacement_detail</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+          <QueryParameter Name="@operator_ids"><Value>=IIF(Parameters!operator_ids.Value Is Nothing, Nothing, Join(Parameters!operator_ids.Value, ","))</Value></QueryParameter>
+          <QueryParameter Name="@start_date"><Value>=Parameters!start_date.Value</Value></QueryParameter>
+          <QueryParameter Name="@end_date"><Value>=Parameters!end_date.Value</Value></QueryParameter>
+          <QueryParameter Name="@replacement_reasons"><Value>=IIF(Parameters!replacement_reasons.Value Is Nothing, Nothing, Join(Parameters!replacement_reasons.Value, ","))</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="replacement_date_local"><DataField>replacement_date_local</DataField></Field>
+        <Field Name="replacement_reason"><DataField>replacement_reason</DataField></Field>
+        <Field Name="customer_display"><DataField>customer_display</DataField></Field>
+        <Field Name="old_card_number_redacted"><DataField>old_card_number_redacted</DataField></Field>
+        <Field Name="old_expiry_date_local"><DataField>old_expiry_date_local</DataField></Field>
+        <Field Name="new_card_number_redacted"><DataField>new_card_number_redacted</DataField></Field>
+        <Field Name="new_expiry_date_local"><DataField>new_expiry_date_local</DataField></Field>
+        <Field Name="balance"><DataField>balance</DataField></Field>
+        <Field Name="operator_name"><DataField>operator_name</DataField></Field>
+        <Field Name="processed_by"><DataField>processed_by</DataField></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsOperators: gc.rpt_org_operators_lst — cascade for P2 Operator filter -->
+    <DataSet Name="dsOperators">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_operators_lst</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="operator_id"><DataField>operator_id</DataField></Field>
+        <Field Name="display_name"><DataField>display_name</DataField></Field>
+      </Fields>
+    </DataSet>
+
+  </DataSets>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PARAMETERS
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <ReportParameters>
+
+    <!-- P1: organization_id — hidden for Owner/Supervisor; visible for GTW Admin -->
+    <ReportParameter Name="organization_id">
+      <DataType>Integer</DataType>
+      <Prompt>Organisation</Prompt>
+      <Hidden>false</Hidden>
+    </ReportParameter>
+
+    <!-- P2: operator_ids — multi-select, cascades from P1, default = All -->
+    <ReportParameter Name="operator_ids">
+      <DataType>String</DataType>
+      <MultiValue>true</MultiValue>
+      <DefaultValue>
+        <DataSetReference>
+          <DataSetName>dsOperators</DataSetName>
+          <ValueField>operator_id</ValueField>
+        </DataSetReference>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsOperators</DataSetName>
+          <ValueField>operator_id</ValueField>
+          <LabelField>display_name</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Operator / Location</Prompt>
+    </ReportParameter>
+
+    <!-- P3: start_date — local date picker, defaults to first of current month -->
+    <ReportParameter Name="start_date">
+      <DataType>DateTime</DataType>
+      <DefaultValue>
+        <Values><Value>=DateSerial(Year(Today()), Month(Today()), 1)</Value></Values>
+      </DefaultValue>
+      <Prompt>Date From</Prompt>
+    </ReportParameter>
+
+    <!-- P4: end_date — local date picker, defaults to today -->
+    <ReportParameter Name="end_date">
+      <DataType>DateTime</DataType>
+      <DefaultValue>
+        <Values><Value>=Today()</Value></Values>
+      </DefaultValue>
+      <Prompt>Date To</Prompt>
+    </ReportParameter>
+
+    <!-- P5: replacement_reasons — multi-select static list, default = All three types (BR-12) -->
+    <ReportParameter Name="replacement_reasons">
+      <DataType>String</DataType>
+      <MultiValue>true</MultiValue>
+      <DefaultValue>
+        <Values>
+          <Value>Lost Card Replaced</Value>
+          <Value>Damaged Card Replaced</Value>
+          <Value>Card Replaced due to Expiry</Value>
+        </Values>
+      </DefaultValue>
+      <ValidValues>
+        <ParameterValues>
+          <ParameterValue>
+            <Value>Lost Card Replaced</Value>
+            <Label>Lost Card</Label>
+          </ParameterValue>
+          <ParameterValue>
+            <Value>Damaged Card Replaced</Value>
+            <Label>Damaged Card</Label>
+          </ParameterValue>
+          <ParameterValue>
+            <Value>Card Replaced due to Expiry</Value>
+            <Label>Expired Renewal</Label>
+          </ParameterValue>
+        </ParameterValues>
+      </ValidValues>
+      <Prompt>Replacement Type</Prompt>
+    </ReportParameter>
+
+  </ReportParameters>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       REPORT SECTIONS
+  ═══════════════════════════════════════════════════════════════════════ -->
+  <ReportSections>
+    <ReportSection>
+
+      <!-- PAGE SETUP: Letter Landscape, 0.5in margins, 10in body width -->
+      <Page>
+
+        <!-- ── PAGE HEADER ── -->
+        <PageHeader>
+          <Height>0.75in</Height>
+          <PrintOnFirstPage>true</PrintOnFirstPage>
+          <PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+
+            <Rectangle Name="rectPageHeaderBg">
+              <Left>0in</Left><Top>0in</Top>
+              <Width>10in</Width><Height>0.75in</Height>
+              <Style><BackgroundColor>#1A3A5C</BackgroundColor><Border><Style>None</Style></Border></Style>
+            </Rectangle>
+
+            <Textbox Name="tbHeaderTitle">
+              <Left>0.12in</Left><Top>0.06in</Top><Width>6in</Width><Height>0.22in</Height>
+              <ZIndex>1</ZIndex>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>Card Replacement Log</Value>
+                <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>15pt</FontSize><FontWeight>Bold</FontWeight></Style>
+              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+            <Textbox Name="tbHeaderSubtitle">
+              <Left>0.12in</Left><Top>0.30in</Top><Width>6in</Width><Height>0.18in</Height>
+              <ZIndex>1</ZIndex>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>Audit Trail — Lost / Damaged / Expired Renewal Card Replacements  ·  SSRS  ·  RPT-014</Value>
+                <Style><Color>#AAC4E0</Color><FontFamily>Calibri</FontFamily><FontSize>9.5pt</FontSize></Style>
+              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+            <Textbox Name="tbHeaderFilters">
+              <Left>0.12in</Left><Top>0.50in</Top><Width>6.5in</Width><Height>0.16in</Height>
+              <ZIndex>1</ZIndex>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>="Period: " &amp; Format(Parameters!start_date.Value, "dd/MM/yyyy") &amp; " – " &amp; Format(Parameters!end_date.Value, "dd/MM/yyyy") &amp; "  ·  Operators: " &amp; IIF(Parameters!operator_ids.Value Is Nothing, "All", Join(Parameters!operator_ids.Label, ", "))</Value>
+                <Style><Color>#7AAABB</Color><FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize></Style>
+              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+            <Textbox Name="tbHeaderGenerated">
+              <Left>6.8in</Left><Top>0.06in</Top><Width>3.1in</Width><Height>0.18in</Height>
+              <ZIndex>1</ZIndex>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>="Generated: " &amp; Format(Globals!ExecutionTime, "dd/MM/yyyy HH:mm") &amp; " UTC"</Value>
+                <Style><Color>#AAC4E0</Color><FontFamily>Calibri</FontFamily><FontSize>9.5pt</FontSize></Style>
+              </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+            <Textbox Name="tbHeaderUser">
+              <Left>6.8in</Left><Top>0.26in</Top><Width>3.1in</Width><Height>0.18in</Height>
+              <ZIndex>1</ZIndex>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>="By: " &amp; User!UserID</Value>
+                <Style><Color>#AAC4E0</Color><FontFamily>Calibri</FontFamily><FontSize>9.5pt</FontSize></Style>
+              </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+            <Textbox Name="tbHeaderReportID">
+              <Left>6.8in</Left><Top>0.46in</Top><Width>3.1in</Width><Height>0.18in</Height>
+              <ZIndex>1</ZIndex>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>Report ID: RPT-014  ·  SSRS Web Portal</Value>
+                <Style><Color>#7AAABB</Color><FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize></Style>
+              </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+          </ReportItems>
+          <Style />
+        </PageHeader>
+
+        <!-- ── PAGE FOOTER ── -->
+        <PageFooter>
+          <Height>0.30in</Height>
+          <PrintOnFirstPage>true</PrintOnFirstPage>
+          <PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+
+            <Textbox Name="tbFooterLabel">
+              <Left>0in</Left><Top>0.05in</Top><Width>6.5in</Width><Height>0.20in</Height>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>RPT-014 — Card Replacement Log  ·  CONFIDENTIAL — Internal Use Only  ·  Access: GTW Admin, Owner (role_id=8), Supervisor (role_id=9)</Value>
+                <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+              </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+            <Textbox Name="tbFooterPage">
+              <Left>6.5in</Left><Top>0.05in</Top><Width>3.5in</Width><Height>0.20in</Height>
+              <Paragraphs><Paragraph><TextRuns><TextRun>
+                <Value>="Page " &amp; Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value>
+                <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+              </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+              <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+              <CanGrow>true</CanGrow>
+            </Textbox>
+
+          </ReportItems>
+          <Style />
+        </PageFooter>
+
+        <!-- Letter Landscape: 11in × 8.5in, 0.5in margins -->
+        <PageWidth>11in</PageWidth>
+        <PageHeight>8.5in</PageHeight>
+        <LeftMargin>0.5in</LeftMargin>
+        <RightMargin>0.5in</RightMargin>
+        <TopMargin>0.5in</TopMargin>
+        <BottomMargin>0.5in</BottomMargin>
+        <Style />
+      </Page>
+
+      <!-- ════════════════════════════════════════════════════════════════════
+           BODY
+           Direct body children (TraceCounts deviation — no root wrap):
+             1. rectKPIBand + tbKPIBandLabel + tbKPIBandSP
+             2. KPI Tile 1-4 (rect + accent + label + value + sub each)
+             3. tbPartBBand + tbPartBBandSP
+             4. TablePartB (Tablix — 10 col, header + detail + footer rows)
+             5. rectFootnoteStrip
+      ════════════════════════════════════════════════════════════════════ -->
+      <Body>
+        <Height>7in</Height>
+        <Width>10in</Width>
+        <ReportItems>
+
+          <!-- ── PART A: KPI BAND ─────────────────────────────────────────── -->
+          <Rectangle Name="rectKPIBand">
+            <Left>0in</Left><Top>0in</Top><Width>10in</Width><Height>0.25in</Height>
+            <Style><BackgroundColor>#1A3A5C</BackgroundColor><Border><Style>None</Style></Border></Style>
+          </Rectangle>
+          <Textbox Name="tbKPIBandLabel">
+            <Left>0.10in</Left><Top>0.02in</Top><Width>7in</Width><Height>0.21in</Height>
+            <ZIndex>1</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>PART A — SUMMARY</Value>
+              <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight></Style>
+            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+          <Textbox Name="tbKPIBandSP">
+            <Left>7.1in</Left><Top>0.02in</Top><Width>2.8in</Width><Height>0.21in</Height>
+            <ZIndex>1</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>dsKPI  ·  gc.rpt_org_card_replacement_kpi</Value>
+              <Style><Color>#AAC4E0</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize></Style>
+            </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+            <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+
+          <!-- ── KPI TILE 1: TOTAL REPLACEMENTS (accent #1A3A5C navy) ─────── -->
+          <Rectangle Name="rectKPI1">
+            <Left>0.05in</Left><Top>0.27in</Top><Width>2.40in</Width><Height>0.90in</Height>
+            <Style><BackgroundColor>#FFFFFF</BackgroundColor><Border><Style>Solid</Style><Color>#D4D8DE</Color><Width>1pt</Width></Border></Style>
+          </Rectangle>
+          <Rectangle Name="rectKPI1Accent">
+            <Left>0.05in</Left><Top>0.27in</Top><Width>2.40in</Width><Height>0.052in</Height>
+            <ZIndex>1</ZIndex>
+            <Style><BackgroundColor>#1A3A5C</BackgroundColor><Border><Style>None</Style></Border></Style>
+          </Rectangle>
+          <Textbox Name="tbKPI1Label">
+            <Left>0.12in</Left><Top>0.35in</Top><Width>2.26in</Width><Height>0.16in</Height>
+            <ZIndex>2</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>TOTAL REPLACEMENTS</Value>
+              <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight></Style>
+            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+          <Textbox Name="tbKPI1Value">
+            <Left>0.12in</Left><Top>0.53in</Top><Width>2.26in</Width><Height>0.32in</Height>
+            <ZIndex>2</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>=Format(First(Fields!total_replacements.Value, "dsKPI"), "#,##0")</Value>
+              <Style><Color>#1A3A5C</Color><FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize><FontWeight>Bold</FontWeight></Style>
+            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+          <Textbox Name="tbKPI1Sub">
+            <Left>0.12in</Left><Top>0.87in</Top><Width>2.26in</Width><Height>0.13in</Height>
+            <ZIndex>2</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>All replacement types in selected period</Value>
+              <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Style><VerticalAlign>Top</VerticalAlign><Border><Style>None</Style></Border></Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+
+          <!-- ── KPI TILE 2: LOST CARD (accent #C0392B red) ────────────────── -->
+          <Rectangle Name="rectKPI2">
+            <Left>2.55in</Left><Top>0.27in</Top><Width>2.40in</Width><Height>0.90in</Height>
+            <Style><BackgroundColor>#FFFFFF</BackgroundColor><Border><Style>Solid</Style><Color>#D4D8DE</Color><Width>1pt</Width></Border></Style>
+          </Rectangle>
+          <Rectangle Name="rectKPI2Accent">
+            <Left>2.55in</Left><Top>0.27in</Top><Width>2.40in</Width><Height>0.052in</Height>
+            <ZIndex>1</ZIndex>
+            <Style><BackgroundColor>#C0392B</BackgroundColor><Border><Style>None</Style></Border></Style>
+          </Rectangle>
+          <Textbox Name="tbKPI2Label">
+            <Left>2.62in</Left><Top>0.35in</Top><Width>2.26in</Width><Height>0.16in</Height>
+            <ZIndex>2</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>LOST CARD REPLACEMENTS</Value>
+              <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight></Style>
+            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+          <Textbox Name="tbKPI2Value">
+            <Left>2.62in</Left><Top>0.53in</Top><Width>2.26in</Width><Height>0.32in</Height>
+            <ZIndex>2</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>=Format(First(Fields!lost_replacements.Value, "dsKPI"), "#,##0")</Value>
+              <Style><Color>#C0392B</Color><FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize><FontWeight>Bold</FontWeight></Style>
+            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+          <Textbox Name="tbKPI2Sub">
+            <Left>2.62in</Left><Top>0.87in</Top><Width>2.26in</Width><Height>0.13in</Height>
+            <ZIndex>2</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>Lost Card Replaced events</Value>
+              <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Style><VerticalAlign>Top</VerticalAlign><Border><Style>None</Style></Border></Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+
+          <!-- ── KPI TILE 3: DAMAGED CARD (accent #E67E22 orange) ──────────── -->
+          <Rectangle Name="rectKPI3">
+            <Left>5.05in</Left><Top>0.27in</Top><Width>2.40in</Width><Height>0.90in</Height>
+            <Style><BackgroundColor>#FFFFFF</BackgroundColor><Border><Style>Solid</Style><Color>#D4D8DE</Color><Width>1pt</Width></Border></Style>
+          </Rectangle>
+          <Rectangle Name="rectKPI3Accent">
+            <Left>5.05in</Left><Top>0.27in</Top><Width>2.40in</Width><Height>0.052in</Height>
+            <ZIndex>1</ZIndex>
+            <Style><BackgroundColor>#E67E22</BackgroundColor><Border><Style>None</Style></Border></Style>
+          </Rectangle>
+          <Textbox Name="tbKPI3Label">
+            <Left>5.12in</Left><Top>0.35in</Top><Width>2.26in</Width><Height>0.16in</Height>
+            <ZIndex>2</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>DAMAGED CARD REPLACEMENTS</Value>
+              <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight></Style>
+            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+          <Textbox Name="tbKPI3Value">
+            <Left>5.12in</Left><Top>0.53in</Top><Width>2.26in</Width><Height>0.32in</Height>
+            <ZIndex>2</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>=Format(First(Fields!damaged_replacements.Value, "dsKPI"), "#,##0")</Value>
+              <Style><Color>#E67E22</Color><FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize><FontWeight>Bold</FontWeight></Style>
+            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+          <Textbox Name="tbKPI3Sub">
+            <Left>5.12in</Left><Top>0.87in</Top><Width>2.26in</Width><Height>0.13in</Height>
+            <ZIndex>2</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>Damaged Card Replaced events</Value>
+              <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Style><VerticalAlign>Top</VerticalAlign><Border><Style>None</Style></Border></Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+
+          <!-- ── KPI TILE 4: CARD RENEWALS (accent #27AE60 green) ──────────── -->
+          <Rectangle Name="rectKPI4">
+            <Left>7.55in</Left><Top>0.27in</Top><Width>2.40in</Width><Height>0.90in</Height>
+            <Style><BackgroundColor>#FFFFFF</BackgroundColor><Border><Style>Solid</Style><Color>#D4D8DE</Color><Width>1pt</Width></Border></Style>
+          </Rectangle>
+          <Rectangle Name="rectKPI4Accent">
+            <Left>7.55in</Left><Top>0.27in</Top><Width>2.40in</Width><Height>0.052in</Height>
+            <ZIndex>1</ZIndex>
+            <Style><BackgroundColor>#27AE60</BackgroundColor><Border><Style>None</Style></Border></Style>
+          </Rectangle>
+          <Textbox Name="tbKPI4Label">
+            <Left>7.62in</Left><Top>0.35in</Top><Width>2.26in</Width><Height>0.16in</Height>
+            <ZIndex>2</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>CARD RENEWALS (EXPIRED)</Value>
+              <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight></Style>
+            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+          <Textbox Name="tbKPI4Value">
+            <Left>7.62in</Left><Top>0.53in</Top><Width>2.26in</Width><Height>0.32in</Height>
+            <ZIndex>2</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>=Format(First(Fields!renewal_replacements.Value, "dsKPI"), "#,##0")</Value>
+              <Style><Color>#27AE60</Color><FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize><FontWeight>Bold</FontWeight></Style>
+            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+          <Textbox Name="tbKPI4Sub">
+            <Left>7.62in</Left><Top>0.87in</Top><Width>2.26in</Width><Height>0.13in</Height>
+            <ZIndex>2</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>Card Replaced due to Expiry events</Value>
+              <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+            </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Style><VerticalAlign>Top</VerticalAlign><Border><Style>None</Style></Border></Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+
+          <!-- ── PART B: SECTION BAND ──────────────────────────────────────── -->
+          <!-- Top = 0.27 (KPI top) + 0.90 (KPI height) + 0.10 (gap) = 1.27in -->
+          <Textbox Name="tbPartBBand">
+            <Left>0in</Left><Top>1.27in</Top><Width>10in</Width><Height>0.25in</Height>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>PART B — REPLACEMENT DETAIL</Value>
+              <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight></Style>
+            </TextRun></TextRuns><Style><TextAlign>Left</TextAlign></Style></Paragraph></Paragraphs>
+            <Style>
+              <BackgroundColor>#1A3A5C</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign>
+              <PaddingLeft>6pt</PaddingLeft>
+              <Border><Style>None</Style></Border>
+            </Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+          <Textbox Name="tbPartBBandSP">
+            <Left>6in</Left><Top>1.27in</Top><Width>4in</Width><Height>0.25in</Height>
+            <ZIndex>1</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun>
+              <Value>dsDetail  ·  gc.rpt_org_card_replacement_detail</Value>
+              <Style><Color>#AAC4E0</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize></Style>
+            </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+            <Style>
+              <BackgroundColor>#1A3A5C</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign>
+              <PaddingRight>6pt</PaddingRight>
+              <Border><Style>None</Style></Border>
+            </Style>
+            <CanGrow>true</CanGrow>
+          </Textbox>
+
+          <!-- ══════════════════════════════════════════════════════════════════
+               PART B — REPLACEMENT DETAIL TABLIX
+               10 columns, header + detail + footer rows
+               Column widths (sum = 10.00in):
+                 C1  Replacement Date  1.250in
+                 C2  Customer          0.900in
+                 C3  Old Card #        0.900in
+                 C4  New Card #        0.900in
+                 C5  Reason            1.600in
+                 C6  Old Expiry        0.750in
+                 C7  New Expiry        0.750in
+                 C8  Balance           0.750in
+                 C9  Operator          1.150in
+                 C10 Processed By      1.050in
+          ════════════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablePartB">
+            <DataSetName>dsDetail</DataSetName>
+            <Left>0in</Left><Top>1.54in</Top>
+            <Width>10in</Width>
+            <NoRowsMessage>No replacement records found for the selected filters.</NoRowsMessage>
+
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>1.250in</Width></TablixColumn>
+                <TablixColumn><Width>0.900in</Width></TablixColumn>
+                <TablixColumn><Width>0.900in</Width></TablixColumn>
+                <TablixColumn><Width>0.900in</Width></TablixColumn>
+                <TablixColumn><Width>1.600in</Width></TablixColumn>
+                <TablixColumn><Width>0.750in</Width></TablixColumn>
+                <TablixColumn><Width>0.750in</Width></TablixColumn>
+                <TablixColumn><Width>0.750in</Width></TablixColumn>
+                <TablixColumn><Width>1.150in</Width></TablixColumn>
+                <TablixColumn><Width>1.050in</Width></TablixColumn>
+              </TablixColumns>
+
+              <TablixRows>
+
+                <!-- ── Header row — navy background, white bold text ── -->
+                <TablixRow>
+                  <Height>0.229in</Height>
+                  <TablixCells>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thReplDate">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Replacement Date</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#1A3A5C</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thCustomer">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Customer</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#1A3A5C</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thOldCard">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Old Card #</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#1A3A5C</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thNewCard">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>New Card #</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#1A3A5C</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thReason">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Reason</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#1A3A5C</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thOldExpiry">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Old Expiry</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#1A3A5C</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thNewExpiry">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>New Expiry</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#1A3A5C</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thBalance">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Current Balance</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#1A3A5C</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingRight>3pt</PaddingRight><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thOperator">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Operator</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#1A3A5C</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="thProcessedBy">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>Processed By</Value>
+                          <Style><Color>#FFFFFF</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#1A3A5C</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft><Border><Style>None</Style></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- ── Detail row — alternating white / light grey; Reason col colour-coded per §8.4 ── -->
+                <TablixRow>
+                  <Height>0.208in</Height>
+                  <TablixCells>
+
+                    <!-- C1: Replacement Date (local, dd/MM/yyyy HH:mm) -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdReplDate">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Format(Fields!replacement_date_local.Value, "dd/MM/yyyy HH:mm")</Value>
+                          <Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- C2: Customer (PII-minimised: first_name + last_initial + '.') -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdCustomer">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Fields!customer_display.Value</Value>
+                          <Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- C3: Old Card # (redacted, PCI DSS) -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdOldCard">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Fields!old_card_number_redacted.Value</Value>
+                          <Style><Color>#666666</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- C4: New Card # (redacted, PCI DSS) -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdNewCard">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Fields!new_card_number_redacted.Value</Value>
+                          <Style><Color>#666666</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- C5: Reason — colour-coded per §8.4 -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdReason">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Fields!replacement_reason.Value</Value>
+                          <Style>
+                            <Color>=IIF(Fields!replacement_reason.Value = "Lost Card Replaced", "#C0392B",
+                                   IIF(Fields!replacement_reason.Value = "Damaged Card Replaced", "#E67E22",
+                                   IIF(Fields!replacement_reason.Value = "Card Replaced due to Expiry", "#27AE60",
+                                   "#333333")))</Color>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight>
+                          </Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- C6: Old Expiry (date only) -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdOldExpiry">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=IIF(IsNothing(Fields!old_expiry_date_local.Value), "N/A", Format(Fields!old_expiry_date_local.Value, "dd/MM/yyyy"))</Value>
+                          <Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- C7: New Expiry (date only) -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdNewExpiry">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=IIF(IsNothing(Fields!new_expiry_date_local.Value), "N/A", Format(Fields!new_expiry_date_local.Value, "dd/MM/yyyy"))</Value>
+                          <Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- C8: Balance (current, formatted as currency, right-aligned) — SC-10 -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdBalance">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>="$" &amp; Format(IIF(IsNothing(Fields!balance.Value), 0, Fields!balance.Value), "#,##0.00")</Value>
+                          <Style><Color>#1A3A5C</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign><PaddingRight>3pt</PaddingRight>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- C9: Operator name -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdOperator">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Fields!operator_name.Value</Value>
+                          <Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- C10: Processed By (cashier display name from pc_old.updated_by — BR-13) -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tdProcessedBy">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Fields!processed_by.Value</Value>
+                          <Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style>
+                          <BackgroundColor>=IIF(RowNumber("TablePartB_Details") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor>
+                          <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                          <Border><Style>Solid</Style><Color>#EEEEEE</Color><Width>0.25pt</Width></Border>
+                        </Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- ── Footer row — totals (SC-11, S12): TOTAL label | balance sum | record count ── -->
+                <TablixRow>
+                  <Height>0.229in</Height>
+                  <TablixCells>
+
+                    <!-- C1: TOTAL label (navy, bold) -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tfFooterC1">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>TOTAL</Value>
+                          <Style><Color>#1A3A5C</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#E8EDF5</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                        <Border><Style>Solid</Style><Color>#C8CFD9</Color><Width>0.5pt</Width></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- C2-C7: empty footer cells -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tfFooterC2">
+                        <Paragraphs><Paragraph><TextRuns><TextRun><Value></Value></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#E8EDF5</BackgroundColor><Border><Style>Solid</Style><Color>#C8CFD9</Color><Width>0.5pt</Width></Border></Style>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="tfFooterC3">
+                        <Paragraphs><Paragraph><TextRuns><TextRun><Value></Value></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#E8EDF5</BackgroundColor><Border><Style>Solid</Style><Color>#C8CFD9</Color><Width>0.5pt</Width></Border></Style>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="tfFooterC4">
+                        <Paragraphs><Paragraph><TextRuns><TextRun><Value></Value></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#E8EDF5</BackgroundColor><Border><Style>Solid</Style><Color>#C8CFD9</Color><Width>0.5pt</Width></Border></Style>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="tfFooterC5">
+                        <Paragraphs><Paragraph><TextRuns><TextRun><Value></Value></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#E8EDF5</BackgroundColor><Border><Style>Solid</Style><Color>#C8CFD9</Color><Width>0.5pt</Width></Border></Style>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="tfFooterC6">
+                        <Paragraphs><Paragraph><TextRuns><TextRun><Value></Value></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#E8EDF5</BackgroundColor><Border><Style>Solid</Style><Color>#C8CFD9</Color><Width>0.5pt</Width></Border></Style>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <TablixCell><CellContents>
+                      <Textbox Name="tfFooterC7">
+                        <Paragraphs><Paragraph><TextRuns><TextRun><Value></Value></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#E8EDF5</BackgroundColor><Border><Style>Solid</Style><Color>#C8CFD9</Color><Width>0.5pt</Width></Border></Style>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- C8: Balance sum — SC-11 -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tfFooterBalance">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>="$" &amp; Format(Sum(IIF(IsNothing(Fields!balance.Value), CDec(0), Fields!balance.Value), "dsDetail"), "#,##0.00")</Value>
+                          <Style><Color>#1A3A5C</Color><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight></Style>
+                        </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#E8EDF5</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingRight>3pt</PaddingRight>
+                        <Border><Style>Solid</Style><Color>#C8CFD9</Color><Width>0.5pt</Width></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- C9: empty -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tfFooterC9">
+                        <Paragraphs><Paragraph><TextRuns><TextRun><Value></Value></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#E8EDF5</BackgroundColor><Border><Style>Solid</Style><Color>#C8CFD9</Color><Width>0.5pt</Width></Border></Style>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                    <!-- C10: Record count — SC-11 -->
+                    <TablixCell><CellContents>
+                      <Textbox Name="tfFooterCount">
+                        <Paragraphs><Paragraph><TextRuns><TextRun>
+                          <Value>=Count(Fields!replacement_date_local.Value, "dsDetail") &amp; " records"</Value>
+                          <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                        </TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+                        <Style><BackgroundColor>#E8EDF5</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingRight>3pt</PaddingRight>
+                        <Border><Style>Solid</Style><Color>#C8CFD9</Color><Width>0.5pt</Width></Border></Style>
+                        <CanGrow>true</CanGrow>
+                      </Textbox>
+                    </CellContents></TablixCell>
+
+                  </TablixCells>
+                </TablixRow>
+
+              </TablixRows>
+            </TablixBody>
+
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+              </TablixMembers>
+            </TablixColumnHierarchy>
+
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <!-- Header row — FixedData (screen freeze) + RepeatOnNewPage (PDF/print) -->
+                <TablixMember>
+                  <FixedData>true</FixedData>
+                  <KeepWithGroup>After</KeepWithGroup>
+                  <RepeatOnNewPage>true</RepeatOnNewPage>
+                  <KeepTogether>true</KeepTogether>
+                </TablixMember>
+                <!-- Detail row group -->
+                <TablixMember>
+                  <Group Name="TablePartB_Details">
+                    <DataGroupName>TablePartB_Details</DataGroupName>
+                  </Group>
+                </TablixMember>
+                <!-- Footer row (static — renders once at the end of the detail group) -->
+                <TablixMember />
+              </TablixMembers>
+            </TablixRowHierarchy>
+
+            <Style><Border><Style>None</Style></Border></Style>
+          </Tablix>
+
+          <!-- ── FOOTNOTE STRIP ─────────────────────────────────────────────── -->
+          <!-- Fixed at 12in — accommodates ~50 rows before overlap -->
+          <Rectangle Name="rectFootnoteStrip">
+            <Left>0in</Left><Top>12.0in</Top>
+            <Width>10in</Width><Height>0.55in</Height>
+            <Style><BackgroundColor>#FFFFFF</BackgroundColor><Border><Style>None</Style></Border></Style>
+            <ReportItems>
+
+              <Textbox Name="tbFootnote1">
+                <Left>0in</Left><Top>0in</Top>
+                <Width>10in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>&#xB9;  Card #: redacted format (PCI DSS — no full PAN displayed). Full card data resides in the Vault DB and is never returned by reporting SPs.</Value>
+                  <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <Textbox Name="tbFootnote2">
+                <Left>0in</Left><Top>0.14in</Top>
+                <Width>10in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>&#xB2;  Current Balance: live account balance at report generation time (gc.gift_card_account.current_balance). Historical balance at replacement time is not stored.</Value>
+                  <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <Textbox Name="tbFootnote3">
+                <Left>0in</Left><Top>0.28in</Top>
+                <Width>10in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>&#xB3;  All dates shown in operator local time (DST-aware, GC-035). Customer: first name + last initial only (PII-minimised). Processed By: cashier display name at event time (pc_old.updated_by).</Value>
+                  <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+              <Textbox Name="tbFootnote4">
+                <Left>0in</Left><Top>0.42in</Top>
+                <Width>10in</Width><Height>0.13in</Height>
+                <Paragraphs><Paragraph><TextRuns><TextRun>
+                  <Value>&#x2074;  Access: Organisation Owner (role_id=8), Supervisor (role_id=9), GTW Admin only. Cashier (role_id=10) denied. Organisation field hidden for Owner/Supervisor (value injected from auth session).</Value>
+                  <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize></Style>
+                </TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+                <Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style>
+                <CanGrow>true</CanGrow>
+              </Textbox>
+
+            </ReportItems>
+          </Rectangle>
+
+        </ReportItems>
+      </Body>
+
+    </ReportSection>
+  </ReportSections>
+
+</Report>

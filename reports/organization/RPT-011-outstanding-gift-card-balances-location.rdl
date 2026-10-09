@@ -1,0 +1,730 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+
+  <AutoRefresh>0</AutoRefresh>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+  <Language>en-US</Language>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+
+  
+  <DataSources>
+    <DataSource Name="GTW_GiftCards_DS">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=&lt;sql-server-hostname&gt;;Initial Catalog=GiftCards;Integrated Security=True;ApplicationIntent=ReadOnly</ConnectString>
+        <IntegratedSecurity>true</IntegratedSecurity>
+      </ConnectionProperties>
+      <rd:SecurityType>Integrated</rd:SecurityType>
+    </DataSource>
+  </DataSources>
+
+  
+  <DataSets>
+
+    
+    <DataSet Name="dsKPI">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_loc_outstanding_balances_kpi</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id">
+            <Value>=Parameters!organization_id.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@operator_ids">
+            <Value>=IIF(Parameters!operator_ids.Value Is Nothing, Nothing, Join(Parameters!operator_ids.Value, ","))</Value>
+          </QueryParameter>
+          <QueryParameter Name="@account_status">
+            <Value>=IIF(Parameters!account_status.Value Is Nothing, Nothing, Join(Parameters!account_status.Value, ","))</Value>
+          </QueryParameter>
+          <QueryParameter Name="@card_type">
+            <Value>=IIF(Parameters!card_type.Value = 0, Nothing, Parameters!card_type.Value)</Value>
+          </QueryParameter>
+          <QueryParameter Name="@include_zero_balance">
+            <Value>=Parameters!include_zero_balance.Value</Value>
+          </QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="total_outstanding_balance"><DataField>total_outstanding_balance</DataField></Field>
+        <Field Name="total_account_count"><DataField>total_account_count</DataField></Field>
+        <Field Name="active_account_count"><DataField>active_account_count</DataField></Field>
+        <Field Name="active_balance"><DataField>active_balance</DataField></Field>
+        <Field Name="dormant_account_count"><DataField>dormant_account_count</DataField></Field>
+        <Field Name="dormant_balance"><DataField>dormant_balance</DataField></Field>
+        <Field Name="expired_account_count"><DataField>expired_account_count</DataField></Field>
+        <Field Name="blocked_account_count"><DataField>blocked_account_count</DataField></Field>
+        <Field Name="expired_blocked_balance"><DataField>expired_blocked_balance</DataField></Field>
+        <Field Name="org_timezone_offset"><DataField>org_timezone_offset</DataField></Field>
+      </Fields>
+    </DataSet>
+
+    
+    <DataSet Name="dsDetail">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_loc_outstanding_balances_detail</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+          <QueryParameter Name="@operator_ids"><Value>=IIF(Parameters!operator_ids.Value Is Nothing, Nothing, Join(Parameters!operator_ids.Value, ","))</Value></QueryParameter>
+          <QueryParameter Name="@account_status"><Value>=IIF(Parameters!account_status.Value Is Nothing, Nothing, Join(Parameters!account_status.Value, ","))</Value></QueryParameter>
+          <QueryParameter Name="@card_type"><Value>=IIF(Parameters!card_type.Value = 0, Nothing, Parameters!card_type.Value)</Value></QueryParameter>
+          <QueryParameter Name="@include_zero_balance"><Value>=Parameters!include_zero_balance.Value</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="gift_card_account_id"><DataField>gift_card_account_id</DataField></Field>
+        <Field Name="account_number"><DataField>account_number</DataField></Field>
+        <Field Name="customer_display"><DataField>customer_display</DataField></Field>
+        <Field Name="phone_last4"><DataField>phone_last4</DataField></Field>
+        <Field Name="card_type_display"><DataField>card_type_display</DataField></Field>
+        <Field Name="account_status_id"><DataField>account_status_id</DataField></Field>
+        <Field Name="account_status_name"><DataField>account_status_name</DataField></Field>
+        <Field Name="current_balance"><DataField>current_balance</DataField></Field>
+        <Field Name="member_since_local"><DataField>member_since_local</DataField></Field>
+        <Field Name="last_activity_datetime_local"><DataField>last_activity_datetime_local</DataField></Field>
+        <Field Name="days_since_last_activity"><DataField>days_since_last_activity</DataField></Field>
+        <Field Name="card_status_name"><DataField>card_status_name</DataField></Field>
+        <Field Name="is_dormant"><DataField>is_dormant</DataField></Field>
+      </Fields>
+    </DataSet>
+
+    
+    <DataSet Name="dsOperators">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_operators_lst</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="operator_id"><DataField>operator_id</DataField></Field>
+        <Field Name="display_name"><DataField>display_name</DataField></Field>
+      </Fields>
+    </DataSet>
+
+    
+    <DataSet Name="dsAccountStatuses">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandText>SELECT account_status_id AS status_id, account_status AS status_name FROM GiftCards.mst.account_status ORDER BY account_status_id</CommandText>
+      </Query>
+      <Fields>
+        <Field Name="status_id"><DataField>status_id</DataField></Field>
+        <Field Name="status_name"><DataField>status_name</DataField></Field>
+      </Fields>
+    </DataSet>
+
+  </DataSets>
+
+  
+  <ReportParameters>
+
+    
+    <ReportParameter Name="organization_id">
+      <DataType>Integer</DataType>
+      <Prompt>Organisation</Prompt>
+      <Hidden>false</Hidden>
+    </ReportParameter>
+
+    
+    <ReportParameter Name="operator_ids">
+      <DataType>String</DataType>
+      <MultiValue>true</MultiValue>
+      <DefaultValue>
+        <DataSetReference>
+          <DataSetName>dsOperators</DataSetName>
+          <ValueField>operator_id</ValueField>
+        </DataSetReference>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsOperators</DataSetName>
+          <ValueField>operator_id</ValueField>
+          <LabelField>display_name</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Location(s)</Prompt>
+    </ReportParameter>
+
+    
+    <ReportParameter Name="account_status">
+      <DataType>String</DataType>
+      <MultiValue>true</MultiValue>
+      <DefaultValue>
+        <DataSetReference>
+          <DataSetName>dsAccountStatuses</DataSetName>
+          <ValueField>status_id</ValueField>
+        </DataSetReference>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsAccountStatuses</DataSetName>
+          <ValueField>status_id</ValueField>
+          <LabelField>status_name</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Account Status</Prompt>
+    </ReportParameter>
+
+    
+    <ReportParameter Name="card_type">
+      <DataType>Integer</DataType>
+      <DefaultValue><Values><Value>0</Value></Values></DefaultValue>
+      <ValidValues>
+        <ParameterValues>
+          <ParameterValue><Value>0</Value><Label>All</Label></ParameterValue>
+          <ParameterValue><Value>1</Value><Label>Physical</Label></ParameterValue>
+          <ParameterValue><Value>2</Value><Label>Virtual</Label></ParameterValue>
+        </ParameterValues>
+      </ValidValues>
+      <Prompt>Card Type</Prompt>
+    </ReportParameter>
+
+    
+    <ReportParameter Name="include_zero_balance">
+      <DataType>Boolean</DataType>
+      <DefaultValue><Values><Value>false</Value></Values></DefaultValue>
+      <Prompt>Include Zero Balance Accounts</Prompt>
+    </ReportParameter>
+
+  </ReportParameters>
+
+  
+  <ReportSections>
+    <ReportSection>
+
+      
+      <Page>
+        <PageHeader>
+          <Height>0.75in</Height>
+          <PrintOnFirstPage>true</PrintOnFirstPage>
+          <PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+
+            <Rectangle Name="rectPageHeader">
+              <Left>0in</Left><Top>0in</Top>
+              <Width>10in</Width><Height>0.75in</Height>
+              <Style><BackgroundColor>#1A1A1A</BackgroundColor><Border><Style>None</Style></Border></Style>
+            </Rectangle>
+
+            <Textbox Name="tbHeaderTitle">
+              <Left>0.1in</Left><Top>0.06in</Top><Width>6in</Width><Height>0.22in</Height>
+              <ZIndex>1</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>Outstanding Gift Card Balances</Value>
+              <Style><Color>White</Color><FontFamily>Calibri</FontFamily><FontSize>15pt</FontSize>
+                <FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign>
+                <Border><Style>None</Style></Border>
+              </Style><CanGrow>true</CanGrow></Textbox>
+
+            <Textbox Name="tbHeaderSubtitle">
+              <Left>0.1in</Left><Top>0.30in</Top><Width>6in</Width><Height>0.18in</Height>
+              <ZIndex>1</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>Location Operational Report  ·  SSRS  ·  RPT-011  ·  Live Balance Snapshot</Value>
+              <Style><Color>#AAAAAA</Color><FontFamily>Calibri</FontFamily><FontSize>10pt</FontSize>
+                </Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border>
+              </Style><CanGrow>true</CanGrow></Textbox>
+
+            <Textbox Name="tbHeaderFilters">
+              <Left>0.1in</Left><Top>0.50in</Top><Width>6.5in</Width><Height>0.16in</Height>
+              <ZIndex>1</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(Parameters!card_type.Value = 0, "All Card Types", IIF(Parameters!card_type.Value = 1, "Physical Cards", "Virtual Cards")) &amp; "  ·  Dormancy Threshold: 180 days  ·  Zero Balance: " &amp; IIF(Parameters!include_zero_balance.Value, "Included", "Excluded")</Value>
+              <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>9.5pt</FontSize>
+                </Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border>
+              </Style><CanGrow>true</CanGrow></Textbox>
+
+            <Textbox Name="tbHeaderGenerated">
+              <Left>6.7in</Left><Top>0.06in</Top><Width>3.2in</Width><Height>0.18in</Height>
+              <ZIndex>1</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>="Generated: " &amp; Format(Globals!ExecutionTime, "yyyy-MM-dd HH:mm") &amp; " UTC"</Value>
+              <Style><Color>#AAAAAA</Color><FontFamily>Calibri</FontFamily><FontSize>10pt</FontSize>
+                </Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign>
+                <Border><Style>None</Style></Border>
+              </Style><CanGrow>true</CanGrow></Textbox>
+
+            <Textbox Name="tbHeaderUser">
+              <Left>6.7in</Left><Top>0.26in</Top><Width>3.2in</Width><Height>0.18in</Height>
+              <ZIndex>1</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>="By: " &amp; User!UserID</Value>
+              <Style><Color>#AAAAAA</Color><FontFamily>Calibri</FontFamily><FontSize>10pt</FontSize>
+                </Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign>
+                <Border><Style>None</Style></Border>
+              </Style><CanGrow>true</CanGrow></Textbox>
+
+            <Textbox Name="tbHeaderReportID">
+              <Left>6.7in</Left><Top>0.46in</Top><Width>3.2in</Width><Height>0.18in</Height>
+              <ZIndex>1</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>Report ID: RPT-011  ·  SSRS Web Portal</Value>
+              <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>9.5pt</FontSize>
+                </Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign>
+                <Border><Style>None</Style></Border>
+              </Style><CanGrow>true</CanGrow></Textbox>
+
+          </ReportItems>
+          <Style />
+        </PageHeader>
+
+        
+        <PageFooter>
+          <Height>0.3in</Height>
+          <PrintOnFirstPage>true</PrintOnFirstPage>
+          <PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+
+            <Rectangle Name="rectFooterBg">
+              <Left>0in</Left><Top>0in</Top><Width>10in</Width><Height>0.3in</Height>
+              <Style><BackgroundColor>#1A1A1A</BackgroundColor><Border><Style>None</Style></Border></Style>
+            </Rectangle>
+
+            <Textbox Name="tbFooterLeft">
+              <Left>0.1in</Left><Top>0.04in</Top><Width>4in</Width><Height>0.2in</Height>
+              <ZIndex>1</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>="Outstanding Total: " &amp; Format(First(Fields!total_outstanding_balance.Value,"dsKPI"),"C2") &amp; "  ·  " &amp; First(Fields!total_account_count.Value,"dsKPI").ToString("N0") &amp; " accounts"</Value>
+              <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                </Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border>
+              </Style><CanGrow>true</CanGrow></Textbox>
+
+            <Textbox Name="tbFooterCenter">
+              <Left>3.5in</Left><Top>0.04in</Top><Width>3in</Width><Height>0.2in</Height>
+              <ZIndex>1</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>="Page " &amp; Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value>
+              <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                </Style></TextRun></TextRuns><Style><TextAlign>Center</TextAlign></Style></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign>
+                <Border><Style>None</Style></Border>
+              </Style><CanGrow>true</CanGrow></Textbox>
+
+            <Textbox Name="tbFooterRight">
+              <Left>6.5in</Left><Top>0.04in</Top><Width>3.4in</Width><Height>0.2in</Height>
+              <ZIndex>1</ZIndex>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>CONFIDENTIAL</Value>
+              <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                </Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign>
+                <Border><Style>None</Style></Border>
+              </Style><CanGrow>true</CanGrow></Textbox>
+
+          </ReportItems>
+          <Style />
+        </PageFooter>
+
+        <PageWidth>11in</PageWidth>
+        <PageHeight>8.5in</PageHeight>
+        <LeftMargin>0.5in</LeftMargin>
+        <RightMargin>0.5in</RightMargin>
+        <TopMargin>0.5in</TopMargin>
+        <BottomMargin>0.5in</BottomMargin>
+        <Style />
+      </Page>
+
+      
+      <Body>
+        <Height>6in</Height>
+        <Width>10in</Width>
+        <ReportItems>
+
+          
+
+          
+          <Rectangle Name="rectKPIBand">
+            <Left>0in</Left><Top>0in</Top><Width>10in</Width><Height>0.25in</Height>
+            <Style><BackgroundColor>#1A1A1A</BackgroundColor><Border><Style>None</Style></Border></Style>
+          </Rectangle>
+          <Textbox Name="tbKPIBandLabel">
+            <Left>0.1in</Left><Top>0.02in</Top><Width>6in</Width><Height>0.21in</Height>
+            <ZIndex>1</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>="KEY METRICS — AS OF " &amp; Format(Globals!ExecutionTime, "yyyy-MM-dd")</Value>
+            <Style><Color>White</Color><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+              <FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign>
+              <Border><Style>None</Style></Border>
+            </Style><CanGrow>true</CanGrow></Textbox>
+
+          
+          <Rectangle Name="rctKPI1">
+            <Left>0.05in</Left><Top>0.27in</Top><Width>1.9in</Width><Height>1.1in</Height>
+            <Style>
+              <BackgroundColor>#E8F4FD</BackgroundColor>
+              <Border><Style>Solid</Style><Color>#C8DBF0</Color><Width>1.5pt</Width></Border>
+            </Style>
+          </Rectangle>
+          <Rectangle Name="rctKPI1Accent">
+            <Left>0.05in</Left><Top>0.27in</Top><Width>0.05in</Width><Height>1.1in</Height>
+            <Style><BackgroundColor>#1A1A1A</BackgroundColor><Border><Style>None</Style></Border></Style>
+            <ZIndex>1</ZIndex>
+          </Rectangle>
+          <Rectangle Name="rctKPI1Header">
+            <Left>0.05in</Left><Top>0.27in</Top><Width>1.9in</Width><Height>0.22in</Height>
+            <Style><BackgroundColor>#D6E4F0</BackgroundColor><Border><Style>None</Style></Border></Style>
+            <ZIndex>1</ZIndex>
+          </Rectangle>
+          <Textbox Name="tbKPI1Label">
+            <Left>0.15in</Left><Top>0.29in</Top><Width>1.75in</Width><Height>0.18in</Height>
+            <ZIndex>2</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>TOTAL OUTSTANDING BALANCE</Value>
+            <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+              <FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign>
+              <Border><Style>None</Style></Border>
+            </Style><CanGrow>true</CanGrow></Textbox>
+          <Textbox Name="tbKPI1Value">
+            <Left>0.15in</Left><Top>0.54in</Top><Width>1.75in</Width><Height>0.4in</Height>
+            <ZIndex>2</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(First(Fields!total_outstanding_balance.Value,"dsKPI"),"C2")</Value>
+            <Style><Color>#1A1A1A</Color><FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize>
+              <FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign>
+              <Border><Style>None</Style></Border>
+            </Style><CanGrow>true</CanGrow></Textbox>
+          <Textbox Name="tbKPI1Sub">
+            <Left>0.15in</Left><Top>0.97in</Top><Width>1.75in</Width><Height>0.3in</Height>
+            <ZIndex>2</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>="Across " &amp; First(Fields!total_account_count.Value,"dsKPI").ToString("N0") &amp; " accounts"</Value>
+            <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+              </Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Top</VerticalAlign><Border><Style>None</Style></Border>
+            </Style><CanGrow>true</CanGrow></Textbox>
+
+          
+          <Rectangle Name="rctKPI2">
+            <Left>2.025in</Left><Top>0.27in</Top><Width>1.9in</Width><Height>1.1in</Height>
+            <Style><BackgroundColor>#E8F4FD</BackgroundColor><Border><Style>Solid</Style><Color>#C8DBF0</Color><Width>1.5pt</Width></Border></Style>
+          </Rectangle>
+          <Rectangle Name="rctKPI2Accent">
+            <Left>2.025in</Left><Top>0.27in</Top><Width>0.05in</Width><Height>1.1in</Height>
+            <Style><BackgroundColor>#375623</BackgroundColor><Border><Style>None</Style></Border></Style>
+            <ZIndex>1</ZIndex>
+          </Rectangle>
+          <Rectangle Name="rctKPI2Header">
+            <Left>2.025in</Left><Top>0.27in</Top><Width>1.9in</Width><Height>0.22in</Height>
+            <Style><BackgroundColor>#D6E4F0</BackgroundColor><Border><Style>None</Style></Border></Style>
+            <ZIndex>1</ZIndex>
+          </Rectangle>
+          <Textbox Name="tbKPI2Label">
+            <Left>2.12in</Left><Top>0.29in</Top><Width>1.75in</Width><Height>0.18in</Height>
+            <ZIndex>2</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>ACTIVE ACCOUNTS</Value>
+            <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox>
+          <Textbox Name="tbKPI2Value">
+            <Left>2.12in</Left><Top>0.54in</Top><Width>1.75in</Width><Height>0.4in</Height>
+            <ZIndex>2</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>=First(Fields!active_account_count.Value,"dsKPI").ToString("N0")</Value>
+            <Style><Color>#375623</Color><FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox>
+          <Textbox Name="tbKPI2Sub">
+            <Left>2.12in</Left><Top>0.97in</Top><Width>1.75in</Width><Height>0.3in</Height>
+            <ZIndex>2</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(IIF(First(Fields!total_account_count.Value,"dsKPI") = 0, 0, CDbl(First(Fields!active_account_count.Value,"dsKPI")) / CDbl(First(Fields!total_account_count.Value,"dsKPI")) * 100), "0.0") &amp; "% of accounts"</Value>
+            <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Top</VerticalAlign><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox>
+
+          
+          <Rectangle Name="rctKPI3">
+            <Left>4.0in</Left><Top>0.27in</Top><Width>1.9in</Width><Height>1.1in</Height>
+            <Style><BackgroundColor>#E8F4FD</BackgroundColor><Border><Style>Solid</Style><Color>#C8DBF0</Color><Width>1.5pt</Width></Border></Style>
+          </Rectangle>
+          <Rectangle Name="rctKPI3Accent">
+            <Left>4.0in</Left><Top>0.27in</Top><Width>0.05in</Width><Height>1.1in</Height>
+            <Style><BackgroundColor>#375623</BackgroundColor><Border><Style>None</Style></Border></Style>
+            <ZIndex>1</ZIndex>
+          </Rectangle>
+          <Rectangle Name="rctKPI3Header">
+            <Left>4.0in</Left><Top>0.27in</Top><Width>1.9in</Width><Height>0.22in</Height>
+            <Style><BackgroundColor>#D6E4F0</BackgroundColor><Border><Style>None</Style></Border></Style>
+            <ZIndex>1</ZIndex>
+          </Rectangle>
+          <Textbox Name="tbKPI3Label">
+            <Left>4.09in</Left><Top>0.29in</Top><Width>1.75in</Width><Height>0.18in</Height>
+            <ZIndex>2</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>ACTIVE BALANCE</Value>
+            <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox>
+          <Textbox Name="tbKPI3Value">
+            <Left>4.09in</Left><Top>0.54in</Top><Width>1.75in</Width><Height>0.4in</Height>
+            <ZIndex>2</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(First(Fields!active_balance.Value,"dsKPI"),"C2")</Value>
+            <Style><Color>#375623</Color><FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox>
+          <Textbox Name="tbKPI3Sub">
+            <Left>4.09in</Left><Top>0.97in</Top><Width>1.75in</Width><Height>0.3in</Height>
+            <ZIndex>2</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(IIF(First(Fields!total_outstanding_balance.Value,"dsKPI") = 0, 0, CDbl(First(Fields!active_balance.Value,"dsKPI")) / CDbl(First(Fields!total_outstanding_balance.Value,"dsKPI")) * 100), "0.0") &amp; "% of total balance"</Value>
+            <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Top</VerticalAlign><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox>
+
+          
+          <Rectangle Name="rctKPI4">
+            <Left>5.975in</Left><Top>0.27in</Top><Width>1.9in</Width><Height>1.1in</Height>
+            <Style><BackgroundColor>#E8F4FD</BackgroundColor><Border><Style>Solid</Style><Color>#C8DBF0</Color><Width>1.5pt</Width></Border></Style>
+          </Rectangle>
+          <Rectangle Name="rctKPI4Accent">
+            <Left>5.975in</Left><Top>0.27in</Top><Width>0.05in</Width><Height>1.1in</Height>
+            <Style><BackgroundColor>#C45911</BackgroundColor><Border><Style>None</Style></Border></Style>
+            <ZIndex>1</ZIndex>
+          </Rectangle>
+          <Rectangle Name="rctKPI4Header">
+            <Left>5.975in</Left><Top>0.27in</Top><Width>1.9in</Width><Height>0.22in</Height>
+            <Style><BackgroundColor>#D6E4F0</BackgroundColor><Border><Style>None</Style></Border></Style>
+            <ZIndex>1</ZIndex>
+          </Rectangle>
+          <Textbox Name="tbKPI4Label">
+            <Left>6.065in</Left><Top>0.29in</Top><Width>1.75in</Width><Height>0.18in</Height>
+            <ZIndex>2</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>DORMANT ACCOUNTS</Value>
+            <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox>
+          <Textbox Name="tbKPI4Value">
+            <Left>6.065in</Left><Top>0.54in</Top><Width>1.75in</Width><Height>0.4in</Height>
+            <ZIndex>2</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>=First(Fields!dormant_account_count.Value,"dsKPI").ToString("N0")</Value>
+            <Style><Color>#C45911</Color><FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox>
+          <Textbox Name="tbKPI4Sub">
+            <Left>6.065in</Left><Top>0.97in</Top><Width>1.75in</Width><Height>0.3in</Height>
+            <ZIndex>2</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>="≥ 180 days inactive"</Value>
+            <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Top</VerticalAlign><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox>
+
+          
+          <Rectangle Name="rctKPI5">
+            <Left>7.95in</Left><Top>0.27in</Top><Width>2.0in</Width><Height>1.1in</Height>
+            <Style><BackgroundColor>#E8F4FD</BackgroundColor><Border><Style>Solid</Style><Color>#C8DBF0</Color><Width>1.5pt</Width></Border></Style>
+          </Rectangle>
+          <Rectangle Name="rctKPI5Accent">
+            <Left>7.95in</Left><Top>0.27in</Top><Width>0.05in</Width><Height>1.1in</Height>
+            <Style><BackgroundColor>#833C00</BackgroundColor><Border><Style>None</Style></Border></Style>
+            <ZIndex>1</ZIndex>
+          </Rectangle>
+          <Rectangle Name="rctKPI5Header">
+            <Left>7.95in</Left><Top>0.27in</Top><Width>2.0in</Width><Height>0.22in</Height>
+            <Style><BackgroundColor>#D6E4F0</BackgroundColor><Border><Style>None</Style></Border></Style>
+            <ZIndex>1</ZIndex>
+          </Rectangle>
+          <Textbox Name="tbKPI5Label">
+            <Left>8.04in</Left><Top>0.29in</Top><Width>1.85in</Width><Height>0.18in</Height>
+            <ZIndex>2</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>EXPIRED / BLOCKED BALANCE</Value>
+            <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox>
+          <Textbox Name="tbKPI5Value">
+            <Left>8.04in</Left><Top>0.54in</Top><Width>1.85in</Width><Height>0.4in</Height>
+            <ZIndex>2</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(First(Fields!expired_blocked_balance.Value,"dsKPI"),"C2")</Value>
+            <Style><Color>#833C00</Color><FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox>
+          <Textbox Name="tbKPI5Sub">
+            <Left>8.04in</Left><Top>0.97in</Top><Width>1.85in</Width><Height>0.3in</Height>
+            <ZIndex>2</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>=First(Fields!expired_account_count.Value,"dsKPI").ToString("N0") &amp; " Exp  |  " &amp; First(Fields!blocked_account_count.Value,"dsKPI").ToString("N0") &amp; " Blk"</Value>
+            <Style><Color>#888888</Color><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Top</VerticalAlign><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox>
+
+          
+
+          
+          <Rectangle Name="rectDetailBand">
+            <Left>0in</Left><Top>1.47in</Top><Width>10in</Width><Height>0.25in</Height>
+            <Style><BackgroundColor>#1A1A1A</BackgroundColor><Border><Style>None</Style></Border></Style>
+          </Rectangle>
+          <Textbox Name="tbDetailBandLabel">
+            <Left>0.1in</Left><Top>1.49in</Top><Width>3in</Width><Height>0.21in</Height>
+            <ZIndex>1</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>ACCOUNT DETAIL</Value>
+            <Style><Color>White</Color><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+              <FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign>
+              <Border><Style>None</Style></Border>
+            </Style><CanGrow>true</CanGrow></Textbox>
+          <Textbox Name="tbDetailBandCount">
+            <Left>2.5in</Left><Top>1.49in</Top><Width>7.4in</Width><Height>0.21in</Height>
+            <ZIndex>1</ZIndex>
+          <Paragraphs><Paragraph><TextRuns><TextRun><Value>=First(Fields!total_account_count.Value,"dsKPI").ToString("N0") &amp; " accounts  ·  Sorted: Balance (Desc)  ·  Local time displayed"</Value>
+            <Style><Color>#AAAAAA</Color><FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize>
+              </Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><VerticalAlign>Middle</VerticalAlign><Border><Style>None</Style></Border>
+            </Style><CanGrow>true</CanGrow></Textbox>
+
+          
+          <Tablix Name="tblxAccountDetail">
+            <DataSetName>dsDetail</DataSetName>
+            <Left>0in</Left><Top>1.74in</Top><Width>10in</Width>
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>1.00in</Width></TablixColumn>
+                <TablixColumn><Width>1.35in</Width></TablixColumn>
+                <TablixColumn><Width>0.65in</Width></TablixColumn>
+                <TablixColumn><Width>0.75in</Width></TablixColumn>
+                <TablixColumn><Width>0.85in</Width></TablixColumn>
+                <TablixColumn><Width>0.90in</Width></TablixColumn>
+                <TablixColumn><Width>0.95in</Width></TablixColumn>
+                <TablixColumn><Width>0.95in</Width></TablixColumn>
+                <TablixColumn><Width>0.85in</Width></TablixColumn>
+                <TablixColumn><Width>0.85in</Width></TablixColumn>
+                <TablixColumn><Width>0.85in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+
+                
+                <TablixRow>
+                  <Height>0.22in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="thAcctNum"><Paragraphs><Paragraph><TextRuns><TextRun><Value>ACCOUNT #</Value><Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>#D6E4F0</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="thCustomer"><Paragraphs><Paragraph><TextRuns><TextRun><Value>CUSTOMER</Value><Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>#D6E4F0</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="thPhone"><Paragraphs><Paragraph><TextRuns><TextRun><Value>PHONE</Value><Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>#D6E4F0</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="thCardType"><Paragraphs><Paragraph><TextRuns><TextRun><Value>CARD TYPE</Value><Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>#D6E4F0</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="thAcctStatus"><Paragraphs><Paragraph><TextRuns><TextRun><Value>ACCT STATUS</Value><Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>#D6E4F0</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="thBalance"><Paragraphs><Paragraph><TextRuns><TextRun><Value>BALANCE</Value><Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>#D6E4F0</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="thMemberSince"><Paragraphs><Paragraph><TextRuns><TextRun><Value>MEMBER SINCE</Value><Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>#D6E4F0</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="thLastActivity"><Paragraphs><Paragraph><TextRuns><TextRun><Value>LAST ACTIVITY</Value><Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>#D6E4F0</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="thDaysInactive"><Paragraphs><Paragraph><TextRuns><TextRun><Value>DAYS INACTIVE</Value><Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>#D6E4F0</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="thCardStatus"><Paragraphs><Paragraph><TextRuns><TextRun><Value>CARD STATUS</Value><Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>#D6E4F0</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="thDormant"><Paragraphs><Paragraph><TextRuns><TextRun><Value>DORMANT</Value><Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>#D6E4F0</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft><Border><Style>None</Style></Border></Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+                
+                <TablixRow>
+                  <Height>0.22in</Height>
+                  <TablixCells>
+
+                    
+                    <TablixCell><CellContents><Textbox Name="tdAcctNum">
+                      <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!account_number.Value</Value>
+                      <Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                        </Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>=IIF(Fields!is_dormant.Value, "#FFF8F0", IIF(RowNumber(Nothing) Mod 2 = 0, "#F7F9FC", "White"))</BackgroundColor>
+                        <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                        <BorderColor><Left>=IIF(Fields!is_dormant.Value, "#C45911", "Transparent")</Left></BorderColor>
+                        <BorderStyle><Left>=IIF(Fields!is_dormant.Value, "Solid", "None")</Left></BorderStyle>
+                        <BorderWidth><Left>3pt</Left><Right>0pt</Right><Top>0pt</Top><Bottom>0pt</Bottom></BorderWidth>
+                      </Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+
+                    
+                    <TablixCell><CellContents><Textbox Name="tdCustomer">
+                      <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!customer_display.Value</Value>
+                      <Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                        </Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>=IIF(Fields!is_dormant.Value, "#FFF8F0", IIF(RowNumber(Nothing) Mod 2 = 0, "#F7F9FC", "White"))</BackgroundColor>
+                        <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                        <Border><Style>None</Style></Border>
+                      </Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+
+                    
+                    <TablixCell><CellContents><Textbox Name="tdPhone">
+                      <Paragraphs><Paragraph><TextRuns><TextRun><Value>="×× " &amp; Fields!phone_last4.Value</Value>
+                      <Style><Color>#777777</Color><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                        </Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>=IIF(Fields!is_dormant.Value, "#FFF8F0", IIF(RowNumber(Nothing) Mod 2 = 0, "#F7F9FC", "White"))</BackgroundColor>
+                        <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                        <Border><Style>None</Style></Border>
+                      </Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+
+                    
+                    <TablixCell><CellContents><Textbox Name="tdCardType">
+                      <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!card_type_display.Value</Value>
+                      <Style><Color>#333333</Color><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                        </Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>=IIF(Fields!is_dormant.Value, "#FFF8F0", IIF(RowNumber(Nothing) Mod 2 = 0, "#F7F9FC", "White"))</BackgroundColor>
+                        <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                        <Border><Style>None</Style></Border>
+                      </Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+
+                    
+                    <TablixCell><CellContents><Textbox Name="tdAcctStatus">
+                      <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!account_status_name.Value</Value>
+                      <Style><Color>=IIF(Fields!account_status_id.Value = 1, "#375623", IIF(Fields!account_status_id.Value = 2, "#833C00", "#4A235A"))</Color>
+                        <FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight>
+                        </Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>=IIF(Fields!is_dormant.Value, "#FFF8F0", IIF(RowNumber(Nothing) Mod 2 = 0, "#F7F9FC", "White"))</BackgroundColor>
+                        <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                        <Border><Style>None</Style></Border>
+                      </Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+
+                    
+                    <TablixCell><CellContents><Textbox Name="tdBalance">
+                      <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(Fields!current_balance.Value, "C2")</Value>
+                      <Style><Color>=IIF(Fields!account_status_id.Value = 1, "#375623", "#999999")</Color>
+                        <FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight>
+                        </Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>=IIF(Fields!is_dormant.Value, "#FFF8F0", IIF(RowNumber(Nothing) Mod 2 = 0, "#F7F9FC", "White"))</BackgroundColor>
+                        <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                        <Border><Style>None</Style></Border>
+                      </Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+
+                    
+                    <TablixCell><CellContents><Textbox Name="tdMemberSince">
+                      <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(Fields!member_since_local.Value, "yyyy-MM-dd")</Value>
+                      <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                        </Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>=IIF(Fields!is_dormant.Value, "#FFF8F0", IIF(RowNumber(Nothing) Mod 2 = 0, "#F7F9FC", "White"))</BackgroundColor>
+                        <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                        <Border><Style>None</Style></Border>
+                      </Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+
+                    
+                    <TablixCell><CellContents><Textbox Name="tdLastActivity">
+                      <Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(IsNothing(Fields!last_activity_datetime_local.Value), "—", Format(Fields!last_activity_datetime_local.Value, "yyyy-MM-dd"))</Value>
+                      <Style><Color>=IIF(Fields!days_since_last_activity.Value &gt;= 180, "#833C00", IIF(Fields!days_since_last_activity.Value &gt;= 150, "#C45911", "#555555"))</Color>
+                        <FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                        </Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>=IIF(Fields!is_dormant.Value, "#FFF8F0", IIF(RowNumber(Nothing) Mod 2 = 0, "#F7F9FC", "White"))</BackgroundColor>
+                        <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                        <Border><Style>None</Style></Border>
+                      </Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+
+                    
+                    <TablixCell><CellContents><Textbox Name="tdDaysInactive">
+                      <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!days_since_last_activity.Value.ToString("N0")</Value>
+                      <Style><Color>=IIF(Fields!days_since_last_activity.Value &gt;= 180, "#833C00", IIF(Fields!days_since_last_activity.Value &gt;= 150, "#C45911", "#333333"))</Color>
+                        <FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                        <FontWeight>=IIF(Fields!days_since_last_activity.Value &gt;= 150, "Bold", "Normal")</FontWeight>
+                        </Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>=IIF(Fields!is_dormant.Value, "#FFF8F0", IIF(RowNumber(Nothing) Mod 2 = 0, "#F7F9FC", "White"))</BackgroundColor>
+                        <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                        <Border><Style>None</Style></Border>
+                      </Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+
+                    
+                    <TablixCell><CellContents><Textbox Name="tdCardStatus">
+                      <Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(IsNothing(Fields!card_status_name.Value), "—", Fields!card_status_name.Value)</Value>
+                      <Style><Color>#555555</Color><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                        </Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>=IIF(Fields!is_dormant.Value, "#FFF8F0", IIF(RowNumber(Nothing) Mod 2 = 0, "#F7F9FC", "White"))</BackgroundColor>
+                        <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                        <Border><Style>None</Style></Border>
+                      </Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+
+                    
+                    <TablixCell><CellContents><Textbox Name="tdDormant">
+                      <Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(Fields!is_dormant.Value, "DORMANT", "—")</Value>
+                      <Style><Color>=IIF(Fields!is_dormant.Value, "#833C00", "#888888")</Color>
+                        <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                        <FontWeight>=IIF(Fields!is_dormant.Value, "Bold", "Normal")</FontWeight>
+                        </Style></TextRun></TextRuns><Style><TextAlign>Center</TextAlign></Style></Paragraph></Paragraphs><Style><BackgroundColor>=IIF(Fields!is_dormant.Value, "#FAD7A0", IIF(RowNumber(Nothing) Mod 2 = 0, "#F7F9FC", "White"))</BackgroundColor>
+                        <VerticalAlign>Middle</VerticalAlign>
+                        <Border><Style>None</Style></Border>
+                      </Style><CanGrow>true</CanGrow></Textbox></CellContents></TablixCell>
+
+                  </TablixCells>
+                </TablixRow>
+
+              </TablixRows>
+            </TablixBody>
+
+            
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember /><TablixMember /><TablixMember /><TablixMember />
+                <TablixMember /><TablixMember /><TablixMember /><TablixMember />
+                <TablixMember /><TablixMember /><TablixMember />
+              </TablixMembers>
+            </TablixColumnHierarchy>
+
+            
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <TablixMember>
+                  <KeepWithGroup>After</KeepWithGroup>
+                  <RepeatOnNewPage>true</RepeatOnNewPage>
+                  <KeepTogether>true</KeepTogether>
+                </TablixMember>
+                <TablixMember>
+                  <Group Name="AccountDetail" />
+                  <SortExpressions>
+                    <SortExpression><Value>=Fields!current_balance.Value</Value><Direction>Descending</Direction></SortExpression>
+                  </SortExpressions>
+                </TablixMember>
+              </TablixMembers>
+            </TablixRowHierarchy>
+
+            <Style>
+              <Border><Style>None</Style></Border>
+            </Style>
+          </Tablix>
+
+        </ReportItems>
+
+        <Style>
+          <Border><Style>None</Style></Border>
+        </Style>
+      </Body>
+
+    </ReportSection>
+  </ReportSections>
+
+</Report>

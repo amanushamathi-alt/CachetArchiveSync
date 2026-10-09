@@ -1,0 +1,1932 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  RPT-004 — Route Performance Comparison
+  SSRS Report Definition Language (RDL)
+  Spec: coding-agent/specs/web-reports/RPT-004-route-performance-comparison.md
+  Namespace: http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition
+  Repository: reports/organization/RPT-004-route-performance-comparison.rdl
+
+  Deployment target: SSRS Web Portal → /GTW/GiftCards/RPT-004-Route-Performance-Comparison.rdl
+  Data source: GTW_GiftCards_DS (Windows Integrated Security, ReadOnly, GiftCards DB)
+
+  Role gate (enforced by calling portal before rendering URL):
+    DAWN.usm.role.role_id IN (8=Owner, 9=Supervisor) WHERE role_type_id = 3
+
+  Datasets:
+    dsRanking    → gc.rpt_org_route_performance_ranking
+    dsTrend      → gc.rpt_org_route_performance_trend
+    dsBreakdown  → gc.rpt_org_route_performance_detail
+    dsOperators  → gc.rpt_org_operators_lst
+    dsMetricTypes   → inline static dataset (5 rows)
+    dsPeriodTypes   → inline static dataset (3 rows)
+    dsComparePeriod → inline static dataset (2 rows)
+
+  Parameters (P1–P7):
+    organization_id, from_date, to_date, operator_ids (multi), primary_metric,
+    group_by_period, compare_period
+
+  Conditional formatting (Part A ranking rows):
+    rank <= 3                 → bg #C6EFCE, text #375623
+    rank >= (total - 2)       → bg #FFEB9C, text #9C6500
+    else                      → alternating White/#F2F8FE
+
+  Security:
+    No PII columns in any dataset (operator-level aggregates only)
+    No Vault JOIN, no PAN, no full name, no phone, no DOB
+    org isolation via parent_organization_id JOIN in all three SPs
+    ExecutionLog3 auto-audit (CC6.1, CC7.2)
+    Role gate: role_id IN (8,9) enforced by calling portal
+
+  Caching: 30-minute cache for same parameter combination.
+  Configure in SSRS Report Manager → Caching tab. Do not enable snapshots.
+
+  TraceCounts / GTW Gift Card System — 2026-05-25
+-->
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       REPORT PROPERTIES
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <ReportID>RPT-004</ReportID>
+  <Description>Route Performance Comparison — Organisation-level route ranking, trend, and transaction type breakdown. Owner and Supervisor access only.</Description>
+  <Author>TraceCounts GTW System</Author>
+  <AutoRefresh>0</AutoRefresh>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+
+          <!-- ════════════════════════════════════════════════════════════
+               REPORT HEADER BAND — black #1A1A1A, white text
+               Title, org name, period, primary metric, compare flag,
+               generated-by timestamp, report ID.
+          ════════════════════════════════════════════════════════════════ -->
+          <Rectangle Name="ReportHeaderBand">
+            <Style>
+              <BackgroundColor>#1A1A1A</BackgroundColor>
+            </Style>
+            <Top>0in</Top>
+            <Left>0in</Left>
+            <Width>10.5in</Width>
+            <Height>0.9in</Height>
+            <ReportItems>
+              <Textbox Name="TextboxTitle">
+                <Value>Route Performance Comparison</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>13pt</FontSize>
+                  <FontWeight>Bold</FontWeight>
+                  <Color>White</Color>
+                  <VerticalAlign>Middle</VerticalAlign>
+                </Style>
+                <Top>0.05in</Top>
+                <Left>0.1in</Left>
+                <Width>5.5in</Width>
+                <Height>0.22in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxOrgLine">
+                <Value>="Organisation: " &amp; First(Fields!org_name.Value, "dsRanking") &amp; "  ·  Period: " &amp; Format(Parameters!from_date.Value, "MM/dd/yyyy HH:mm") &amp; " – " &amp; Format(Parameters!to_date.Value, "MM/dd/yyyy HH:mm") &amp; " (UTC" &amp; First(Fields!org_timezone_label.Value, "dsRanking") &amp; ")"</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8.5pt</FontSize>
+                  <Color>#AAAAAA</Color>
+                  <VerticalAlign>Middle</VerticalAlign>
+                </Style>
+                <Top>0.28in</Top>
+                <Left>0.1in</Left>
+                <Width>6.5in</Width>
+                <Height>0.16in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxFiltersLine">
+                <Value>="Operators: " &amp; IIF(Parameters!operator_ids.Count = 0, "All Operators", Parameters!operator_ids.Count &amp; " operator(s)") &amp; "  ·  Primary Metric: " &amp; Parameters!primary_metric.Label &amp; "  ·  Compare Period: " &amp; Parameters!compare_period.Label</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8pt</FontSize>
+                  <Color>#888888</Color>
+                  <VerticalAlign>Middle</VerticalAlign>
+                </Style>
+                <Top>0.45in</Top>
+                <Left>0.1in</Left>
+                <Width>6.5in</Width>
+                <Height>0.16in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <!-- Right-aligned run metadata -->
+              <Textbox Name="TextboxGenerated">
+                <Value>="Generated: " &amp; Format(Globals!ExecutionTime, "MM/dd/yyyy HH:mm") &amp; " UTC"</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8.5pt</FontSize>
+                  <Color>#AAAAAA</Color>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+                <Top>0.05in</Top>
+                <Left>5.5in</Left>
+                <Width>4.9in</Width>
+                <Height>0.16in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxUser">
+                <Value>="By: " &amp; User!UserID</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8.5pt</FontSize>
+                  <Color>#AAAAAA</Color>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+                <Top>0.22in</Top>
+                <Left>5.5in</Left>
+                <Width>4.9in</Width>
+                <Height>0.16in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxReportID">
+                <Value>Report ID: RPT-004  ·  SSRS Web Portal</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8pt</FontSize>
+                  <Color>#888888</Color>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+                <Top>0.39in</Top>
+                <Left>5.5in</Left>
+                <Width>4.9in</Width>
+                <Height>0.14in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+            </ReportItems>
+          </Rectangle>
+
+          <!-- ════════════════════════════════════════════════════════════
+               PART A SECTION LABEL — #D6E4F0 divider band
+          ════════════════════════════════════════════════════════════════ -->
+          <Textbox Name="TextboxPartASectionLabel">
+            <Value>PART A — ROUTE RANKING TABLE</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily>
+              <FontSize>8.5pt</FontSize>
+              <FontWeight>Bold</FontWeight>
+              <Color>#1A1A1A</Color>
+              <BackgroundColor>#D6E4F0</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign>
+              <PaddingLeft>10pt</PaddingLeft>
+            </Style>
+            <Top>1.0in</Top>
+            <Left>0in</Left>
+            <Width>7.5in</Width>
+            <Height>0.22in</Height>
+          </Textbox>
+          <Textbox Name="TextboxPartADatasetLabel">
+            <Value>dsRanking  ·  gc.rpt_org_route_performance_ranking</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily>
+              <FontSize>7.5pt</FontSize>
+              <Color>#555555</Color>
+              <BackgroundColor>#D6E4F0</BackgroundColor>
+              <TextAlign>Right</TextAlign>
+              <VerticalAlign>Middle</VerticalAlign>
+              <PaddingRight>8pt</PaddingRight>
+            </Style>
+            <Top>1.0in</Top>
+            <Left>7.5in</Left>
+            <Width>3.0in</Width>
+            <Height>0.22in</Height>
+          </Textbox>
+
+          <!-- ════════════════════════════════════════════════════════════
+               PART A — RANKING TABLE TABLIX (dsRanking)
+               One row per operator, sorted by rank ASC.
+               Columns: rank, operator_display_name, transaction_count,
+               total_credit_amount, total_debit_amount, total_fee,
+               new_registrations, active_customers_count,
+               avg_transaction_value, pct_of_org_total,
+               [optional] prior_period_metric_value, pct_change_vs_prior_period
+
+               Background expression (per row):
+                 rank <= 3         → #C6EFCE (green)
+                 rank >= total - 2 → #FFEB9C (amber)
+                 else              → alternating White / #F2F8FE
+
+               Text color expression (per row):
+                 rank <= 3         → #375623
+                 rank >= total - 2 → #9C6500
+                 else              → #333333
+          ════════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablixRanking">
+            <DataSetName>dsRanking</DataSetName>
+            <TablixBody>
+              <TablixColumns>
+                <!-- Rank (0.5in) | Location (1.8in) | Txns (0.8in) | Credits (1.0in) | Debits (0.9in) | Fees (0.7in) | Reg (0.7in) | ActiveCust (0.7in) | AvgTxn (0.8in) | PctTotal (0.8in) | PriorPeriod (0.9in) | PctChange (0.8in) -->
+                <TablixColumn><Width>0.5in</Width></TablixColumn>
+                <TablixColumn><Width>1.8in</Width></TablixColumn>
+                <TablixColumn><Width>0.8in</Width></TablixColumn>
+                <TablixColumn><Width>1.0in</Width></TablixColumn>
+                <TablixColumn><Width>0.9in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.65in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>0.75in</Width></TablixColumn>
+                <TablixColumn><Width>0.8in</Width></TablixColumn>
+                <TablixColumn><Width>0.9in</Width></TablixColumn>
+                <TablixColumn><Width>0.8in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+
+                <!-- Column header row — dark #1A1A1A, white bold text -->
+                <TablixRow>
+                  <Height>0.22in</Height>
+                  <TablixCells>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="HdrRank">
+                          <Value>Rank</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>White</Color>
+                            <BackgroundColor>#1A1A1A</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="HdrLocation">
+                          <Value>Location</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>White</Color>
+                            <BackgroundColor>#1A1A1A</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="HdrTransactions">
+                          <Value>Transactions</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>White</Color>
+                            <BackgroundColor>#1A1A1A</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="HdrCredits">
+                          <Value>Credits</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>White</Color>
+                            <BackgroundColor>#1A1A1A</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="HdrDebits">
+                          <Value>Debits</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>White</Color>
+                            <BackgroundColor>#1A1A1A</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="HdrFees">
+                          <Value>Fees</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>White</Color>
+                            <BackgroundColor>#1A1A1A</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="HdrRegistrations">
+                          <Value>Registrations</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>White</Color>
+                            <BackgroundColor>#1A1A1A</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="HdrActiveCustomers">
+                          <Value>Active Cust</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>White</Color>
+                            <BackgroundColor>#1A1A1A</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="HdrAvgTxn">
+                          <Value>Avg Txn</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>White</Color>
+                            <BackgroundColor>#1A1A1A</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="HdrPctOfTotal">
+                          <Value>% of Total</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>White</Color>
+                            <BackgroundColor>#1A1A1A</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Prior period column — visible only when @compare_period = 1 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="HdrPriorPeriod">
+                          <Value>Prior Period</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>White</Color>
+                            <BackgroundColor>#1A1A1A</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                      <ColSpan>1</ColSpan>
+                    </TablixCell>
+                    <!-- % Change column — visible only when @compare_period = 1 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="HdrPctChange">
+                          <Value>% Change</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>White</Color>
+                            <BackgroundColor>#1A1A1A</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- Detail data row — one per operator, conditional formatting on rank -->
+                <TablixRow>
+                  <Height>0.22in</Height>
+                  <TablixCells>
+                    <!-- Rank cell -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataRank">
+                          <Value>=Fields!rank.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                            <FontWeight>Bold</FontWeight>
+                            <Color>=IIF(Fields!rank.Value &lt;= 3, "#375623", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#9C6500", "#333333"))</Color>
+                            <BackgroundColor>=IIF(Fields!rank.Value &lt;= 3, "#C6EFCE", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#FFEB9C", IIF(RowNumber("TablixRanking") Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                            <TextAlign>Center</TextAlign><VerticalAlign>Middle</VerticalAlign>
+                            <Format>#,##0</Format>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Location name -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataLocation">
+                          <Value>=Fields!operator_display_name.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>=IIF(Fields!rank.Value &lt;= 3, "#375623", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#9C6500", "#333333"))</Color>
+                            <BackgroundColor>=IIF(Fields!rank.Value &lt;= 3, "#C6EFCE", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#FFEB9C", IIF(RowNumber("TablixRanking") Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Transaction count -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataTransactionCount">
+                          <Value>=Fields!transaction_count.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>=IIF(Fields!rank.Value &lt;= 3, "#375623", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#9C6500", "#333333"))</Color>
+                            <BackgroundColor>=IIF(Fields!rank.Value &lt;= 3, "#C6EFCE", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#FFEB9C", IIF(RowNumber("TablixRanking") Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                            <Format>#,##0</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Total credit amount -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataTotalCreditAmount">
+                          <Value>=Fields!total_credit_amount.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>=IIF(Fields!rank.Value &lt;= 3, "#375623", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#9C6500", "#333333"))</Color>
+                            <BackgroundColor>=IIF(Fields!rank.Value &lt;= 3, "#C6EFCE", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#FFEB9C", IIF(RowNumber("TablixRanking") Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                            <Format>$#,##0.00</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Total debit amount -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataTotalDebitAmount">
+                          <Value>=Fields!total_debit_amount.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>=IIF(Fields!rank.Value &lt;= 3, "#375623", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#9C6500", "#333333"))</Color>
+                            <BackgroundColor>=IIF(Fields!rank.Value &lt;= 3, "#C6EFCE", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#FFEB9C", IIF(RowNumber("TablixRanking") Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                            <Format>$#,##0.00</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Total fee -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataTotalFee">
+                          <Value>=Fields!total_fee.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>=IIF(Fields!rank.Value &lt;= 3, "#375623", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#9C6500", "#333333"))</Color>
+                            <BackgroundColor>=IIF(Fields!rank.Value &lt;= 3, "#C6EFCE", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#FFEB9C", IIF(RowNumber("TablixRanking") Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                            <Format>$#,##0.00</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- New registrations -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataNewRegistrations">
+                          <Value>=Fields!new_registrations.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>=IIF(Fields!rank.Value &lt;= 3, "#375623", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#9C6500", "#333333"))</Color>
+                            <BackgroundColor>=IIF(Fields!rank.Value &lt;= 3, "#C6EFCE", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#FFEB9C", IIF(RowNumber("TablixRanking") Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                            <Format>#,##0</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Active customers count -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataActiveCustomersCount">
+                          <Value>=Fields!active_customers_count.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>=IIF(Fields!rank.Value &lt;= 3, "#375623", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#9C6500", "#333333"))</Color>
+                            <BackgroundColor>=IIF(Fields!rank.Value &lt;= 3, "#C6EFCE", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#FFEB9C", IIF(RowNumber("TablixRanking") Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                            <Format>#,##0</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Avg transaction value -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataAvgTransactionValue">
+                          <Value>=Fields!avg_transaction_value.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>=IIF(Fields!rank.Value &lt;= 3, "#375623", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#9C6500", "#333333"))</Color>
+                            <BackgroundColor>=IIF(Fields!rank.Value &lt;= 3, "#C6EFCE", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#FFEB9C", IIF(RowNumber("TablixRanking") Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                            <Format>$#,##0.00</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- % of org total -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataPctOfOrgTotal">
+                          <Value>=Fields!pct_of_org_total.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>=IIF(Fields!rank.Value &lt;= 3, "#375623", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#9C6500", "#333333"))</Color>
+                            <BackgroundColor>=IIF(Fields!rank.Value &lt;= 3, "#C6EFCE", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#FFEB9C", IIF(RowNumber("TablixRanking") Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                            <Format>#,##0.00\%</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Prior period metric value — hidden when compare_period = 0 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataPriorPeriodMetricValue">
+                          <Value>=IIF(IsNothing(Fields!prior_period_metric_value.Value), "—", Format(Fields!prior_period_metric_value.Value, "$#,##0.00"))</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>=IIF(Fields!rank.Value &lt;= 3, "#375623", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#9C6500", "#333333"))</Color>
+                            <BackgroundColor>=IIF(Fields!rank.Value &lt;= 3, "#C6EFCE", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#FFEB9C", IIF(RowNumber("TablixRanking") Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                      <!-- Hidden when compare_period = 0 -->
+                    </TablixCell>
+                    <!-- % change vs prior period — hidden when compare_period = 0 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataPctChangeVsPrior">
+                          <Value>=IIF(IsNothing(Fields!pct_change_vs_prior_period.Value), "—", Format(Fields!pct_change_vs_prior_period.Value, "#,##0.00\%"))</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>=IIF(Fields!rank.Value &lt;= 3, "#375623", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#9C6500", "#333333"))</Color>
+                            <BackgroundColor>=IIF(Fields!rank.Value &lt;= 3, "#C6EFCE", IIF(Fields!rank.Value &gt;= (CountRows("TablixRanking") - 2), "#FFEB9C", IIF(RowNumber("TablixRanking") Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- Totals footer row — #E2EFDA, text #375623 -->
+                <TablixRow>
+                  <Height>0.25in</Height>
+                  <TablixCells>
+                    <!-- Rank cell shows "Total" label -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="FooterRankLabel">
+                          <Value>Total</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Org Total label -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="FooterOrgTotalLabel">
+                          <Value>Org Total</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Sum transaction count -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="FooterTotalTransactionCount">
+                          <Value>=Sum(Fields!transaction_count.Value)</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <Format>#,##0</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Sum total_credit_amount -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="FooterTotalCreditAmount">
+                          <Value>=Sum(Fields!total_credit_amount.Value)</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <Format>$#,##0.00</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Sum total_debit_amount -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="FooterTotalDebitAmount">
+                          <Value>=Sum(Fields!total_debit_amount.Value)</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <Format>$#,##0.00</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Sum total_fee -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="FooterTotalFee">
+                          <Value>=Sum(Fields!total_fee.Value)</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <Format>$#,##0.00</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Sum new_registrations -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="FooterTotalRegistrations">
+                          <Value>=Sum(Fields!new_registrations.Value)</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <Format>#,##0</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Sum active_customers_count -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="FooterTotalActiveCustomers">
+                          <Value>=Sum(Fields!active_customers_count.Value)</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <Format>#,##0</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Avg Txn — N/A at org total level -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="FooterAvgTxnNa">
+                          <Value>—</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>#CCCCCC</Color><BackgroundColor>#E2EFDA</BackgroundColor>
+                            <TextAlign>Center</TextAlign><VerticalAlign>Middle</VerticalAlign>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- pct_of_org_total sums to 100% -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="FooterTotalPctOfOrgTotal">
+                          <Value>=Sum(Fields!pct_of_org_total.Value)</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <Format>#,##0.00\%</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Prior period total -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="FooterTotalPriorPeriod">
+                          <Value>=Sum(Fields!prior_period_metric_value.Value)</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <Format>$#,##0.00</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- % change — N/A at total level -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="FooterPctChangeNa">
+                          <Value>—</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>#CCCCCC</Color><BackgroundColor>#E2EFDA</BackgroundColor>
+                            <TextAlign>Center</TextAlign><VerticalAlign>Middle</VerticalAlign>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+              </TablixRows>
+            </TablixBody>
+
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <!-- One static member per column (12 columns) -->
+                <TablixMember/><TablixMember/><TablixMember/><TablixMember/>
+                <TablixMember/><TablixMember/><TablixMember/><TablixMember/>
+                <TablixMember/>
+                <TablixMember/>
+                <!-- Prior period column — hidden when compare_period = 0 -->
+                <TablixMember>
+                  <Visibility>
+                    <Hidden>=IIF(Parameters!compare_period.Value = 0, true, false)</Hidden>
+                  </Visibility>
+                </TablixMember>
+                <!-- % change column — hidden when compare_period = 0 -->
+                <TablixMember>
+                  <Visibility>
+                    <Hidden>=IIF(Parameters!compare_period.Value = 0, true, false)</Hidden>
+                  </Visibility>
+                </TablixMember>
+              </TablixMembers>
+            </TablixColumnHierarchy>
+
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <!-- Column header row (static) -->
+                <TablixMember>
+                  <KeepWithGroup>After</KeepWithGroup>
+                  <RepeatOnNewPage>true</RepeatOnNewPage>
+                </TablixMember>
+                <!-- Detail rows — sorted by rank ASC -->
+                <TablixMember>
+                  <DataGroupName>RankingDetailGroup</DataGroupName>
+                  <Group Name="RankingDetailGroup"/>
+                  <SortExpressions>
+                    <SortExpression>
+                      <Value>=Fields!rank.Value</Value>
+                      <Direction>Ascending</Direction>
+                    </SortExpression>
+                  </SortExpressions>
+                </TablixMember>
+                <!-- Totals footer row (static) -->
+                <TablixMember/>
+              </TablixMembers>
+            </TablixRowHierarchy>
+
+            <Top>1.25in</Top>
+            <Left>0in</Left>
+            <Width>10.5in</Width>
+          </Tablix>
+
+          <!-- ════════════════════════════════════════════════════════════
+               PART B SECTION LABEL — #D6E4F0 divider band
+          ════════════════════════════════════════════════════════════════ -->
+          <Textbox Name="TextboxPartBSectionLabel">
+            <Value>PART B — PERFORMANCE TREND</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#1A1A1A</Color>
+              <BackgroundColor>#D6E4F0</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign><PaddingLeft>10pt</PaddingLeft>
+            </Style>
+            <Top>3.5in</Top><Left>0in</Left>
+            <Width>7.5in</Width><Height>0.22in</Height>
+          </Textbox>
+          <Textbox Name="TextboxPartBDatasetLabel">
+            <Value>dsTrend  ·  gc.rpt_org_route_performance_trend</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#555555</Color><BackgroundColor>#D6E4F0</BackgroundColor>
+              <TextAlign>Right</TextAlign><VerticalAlign>Middle</VerticalAlign><PaddingRight>8pt</PaddingRight>
+            </Style>
+            <Top>3.5in</Top><Left>7.5in</Left>
+            <Width>3.0in</Width><Height>0.22in</Height>
+          </Textbox>
+
+          <!-- ════════════════════════════════════════════════════════════
+               PART B — SSRS LINE CHART (ChartTrend)
+               CategoryGroup: period_label, sorted by period_start ASC
+               SeriesGroup: operator_display_name
+               Value: metric_value
+               Type: Line
+               Height: 2.5in; Width: 10.5in
+               Title: derived from parameter labels and date range
+          ════════════════════════════════════════════════════════════════ -->
+          <Chart Name="ChartTrend">
+            <DataSetName>dsTrend</DataSetName>
+            <ChartType>Line</ChartType>
+            <SeriesGroupings>
+              <SeriesGrouping>
+                <DynamicSeriesGroups>
+                  <SeriesGroup Name="ChartSeriesOperator">
+                    <Group Name="ChartSeriesOperator">
+                      <GroupExpressions>
+                        <GroupExpression>=Fields!operator_display_name.Value</GroupExpression>
+                      </GroupExpressions>
+                    </Group>
+                    <SortExpressions>
+                      <SortExpression>
+                        <Value>=Fields!operator_display_name.Value</Value>
+                        <Direction>Ascending</Direction>
+                      </SortExpression>
+                    </SortExpressions>
+                  </SeriesGroup>
+                </DynamicSeriesGroups>
+              </SeriesGrouping>
+            </SeriesGroupings>
+            <CategoryGroupings>
+              <CategoryGrouping>
+                <DynamicCategoryGroups>
+                  <CategoryGroup Name="ChartCategoryPeriod">
+                    <Group Name="ChartCategoryPeriod">
+                      <GroupExpressions>
+                        <GroupExpression>=Fields!period_label.Value</GroupExpression>
+                      </GroupExpressions>
+                    </Group>
+                    <SortExpressions>
+                      <SortExpression>
+                        <Value>=Fields!period_start.Value</Value>
+                        <Direction>Ascending</Direction>
+                      </SortExpression>
+                    </SortExpressions>
+                  </CategoryGroup>
+                </DynamicCategoryGroups>
+              </CategoryGrouping>
+            </CategoryGroupings>
+            <ChartData>
+              <ChartSeriesCollection>
+                <ChartSeries Name="MetricSeries">
+                  <ChartDataPoints>
+                    <ChartDataPoint>
+                      <ChartDataPointValues>
+                        <Y>=Sum(Fields!metric_value.Value)</Y>
+                      </ChartDataPointValues>
+                      <ChartDataPointLabel>
+                        <ToolTip>=Fields!operator_display_name.Value &amp; ": " &amp; Format(Sum(Fields!metric_value.Value), "$#,##0.00")</ToolTip>
+                      </ChartDataPointLabel>
+                    </ChartDataPoint>
+                  </ChartDataPoints>
+                </ChartSeries>
+              </ChartSeriesCollection>
+            </ChartData>
+            <ChartTitle>
+              <Caption>="[" &amp; Parameters!primary_metric.Label &amp; "] by Location — " &amp; Format(Parameters!from_date.Value, "MM/dd/yyyy") &amp; " to " &amp; Format(Parameters!to_date.Value, "MM/dd/yyyy")</Caption>
+              <Style>
+                <FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                <FontWeight>Bold</FontWeight><Color>#1A1A1A</Color>
+              </Style>
+            </ChartTitle>
+            <ChartLegend Name="ChartLegend1">
+              <Position>Right</Position>
+              <Style>
+                <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                <Color>#333333</Color>
+              </Style>
+            </ChartLegend>
+            <ChartAxes>
+              <ChartAxis>
+                <AxisType>Category</AxisType>
+                <Style>
+                  <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#666666</Color>
+                </Style>
+                <Title>
+                  <Caption>Period</Caption>
+                </Title>
+              </ChartAxis>
+              <ChartAxis>
+                <AxisType>Value</AxisType>
+                <Style>
+                  <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#666666</Color>
+                </Style>
+                <Title>
+                  <Caption>=Parameters!primary_metric.Label</Caption>
+                </Title>
+              </ChartAxis>
+            </ChartAxes>
+            <Style>
+              <BackgroundColor>White</BackgroundColor>
+              <BorderColor>#D0D0D0</BorderColor>
+              <BorderStyle>Solid</BorderStyle>
+              <BorderWidth>0.5pt</BorderWidth>
+            </Style>
+            <Top>3.75in</Top>
+            <Left>0in</Left>
+            <Width>10.5in</Width>
+            <Height>2.5in</Height>
+          </Chart>
+
+          <!-- ════════════════════════════════════════════════════════════
+               PART B — TABULAR FALLBACK TABLIX (TablixTrend)
+               Cross-tab: rows = period_label, columns = operator_display_name
+               Sort: period_start ASC
+               Always present (exported even when chart is not available in Excel/CSV)
+          ════════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablixTrend">
+            <DataSetName>dsTrend</DataSetName>
+            <TablixBody>
+              <TablixColumns>
+                <!-- Period column (1.5in) + dynamic columns per operator -->
+                <TablixColumn><Width>1.5in</Width></TablixColumn>
+                <TablixColumn><Width>1.5in</Width></TablixColumn>
+                <TablixColumn><Width>1.2in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+                <!-- Header row -->
+                <TablixRow>
+                  <Height>0.22in</Height>
+                  <TablixCells>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="TrendHdrPeriod">
+                          <Value>Period</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#AAAAAA</Color>
+                            <BackgroundColor>#333333</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="TrendHdrOperator">
+                          <Value>=Fields!operator_display_name.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#AAAAAA</Color>
+                            <BackgroundColor>#333333</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="TrendHdrCumulative">
+                          <Value>Cumulative</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#AAAAAA</Color>
+                            <BackgroundColor>#333333</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+                <!-- Detail row — one per (period × operator) -->
+                <TablixRow>
+                  <Height>0.19in</Height>
+                  <TablixCells>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="TrendDataPeriodLabel">
+                          <Value>=Fields!period_label.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#333333</Color>
+                            <BackgroundColor>=IIF(RowNumber(Nothing) Mod 2 = 0, "#F2F8FE", "White")</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="TrendDataMetricValue">
+                          <Value>=Sum(Fields!metric_value.Value)</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#333333</Color>
+                            <BackgroundColor>=IIF(RowNumber(Nothing) Mod 2 = 0, "#F2F8FE", "White")</BackgroundColor>
+                            <Format>$#,##0.00</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="TrendDataCumulativeValue">
+                          <Value>=Sum(Fields!cumulative_metric_value.Value)</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#666666</Color>
+                            <BackgroundColor>=IIF(RowNumber(Nothing) Mod 2 = 0, "#F2F8FE", "White")</BackgroundColor>
+                            <Format>$#,##0.00</Format><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+              </TablixRows>
+            </TablixBody>
+
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember/> <!-- Period label (static row group header) -->
+                <TablixMember>  <!-- Operator dynamic column group -->
+                  <DataGroupName>TrendOperatorColGroup</DataGroupName>
+                  <Group Name="TrendOperatorColGroup">
+                    <GroupExpressions>
+                      <GroupExpression>=Fields!operator_display_name.Value</GroupExpression>
+                    </GroupExpressions>
+                  </Group>
+                  <SortExpressions>
+                    <SortExpression>
+                      <Value>=Fields!operator_display_name.Value</Value>
+                      <Direction>Ascending</Direction>
+                    </SortExpression>
+                  </SortExpressions>
+                </TablixMember>
+                <TablixMember/> <!-- Cumulative column (static) -->
+              </TablixMembers>
+            </TablixColumnHierarchy>
+
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <!-- Column header row (static) -->
+                <TablixMember>
+                  <KeepWithGroup>After</KeepWithGroup>
+                  <RepeatOnNewPage>true</RepeatOnNewPage>
+                </TablixMember>
+                <!-- Detail rows grouped by period_label, sorted by period_start ASC -->
+                <TablixMember>
+                  <DataGroupName>TrendPeriodRowGroup</DataGroupName>
+                  <Group Name="TrendPeriodRowGroup">
+                    <GroupExpressions>
+                      <GroupExpression>=Fields!period_label.Value</GroupExpression>
+                    </GroupExpressions>
+                  </Group>
+                  <SortExpressions>
+                    <SortExpression>
+                      <Value>=Fields!period_start.Value</Value>
+                      <Direction>Ascending</Direction>
+                    </SortExpression>
+                  </SortExpressions>
+                </TablixMember>
+              </TablixMembers>
+            </TablixRowHierarchy>
+
+            <Top>6.35in</Top>
+            <Left>0in</Left>
+            <Width>10.5in</Width>
+          </Tablix>
+
+          <!-- ════════════════════════════════════════════════════════════
+               PART C SECTION LABEL — #D6E4F0 divider band
+          ════════════════════════════════════════════════════════════════ -->
+          <Textbox Name="TextboxPartCSectionLabel">
+            <Value>PART C — TRANSACTION TYPE BREAKDOWN</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#1A1A1A</Color>
+              <BackgroundColor>#D6E4F0</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign><PaddingLeft>10pt</PaddingLeft>
+            </Style>
+            <Top>8.1in</Top><Left>0in</Left>
+            <Width>7.5in</Width><Height>0.22in</Height>
+          </Textbox>
+          <Textbox Name="TextboxPartCDatasetLabel">
+            <Value>dsBreakdown  ·  gc.rpt_org_route_performance_detail</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#555555</Color><BackgroundColor>#D6E4F0</BackgroundColor>
+              <TextAlign>Right</TextAlign><VerticalAlign>Middle</VerticalAlign><PaddingRight>8pt</PaddingRight>
+            </Style>
+            <Top>8.1in</Top><Left>7.5in</Left>
+            <Width>3.0in</Width><Height>0.22in</Height>
+          </Textbox>
+
+          <!-- ════════════════════════════════════════════════════════════
+               PART C — TRANSACTION TYPE BREAKDOWN MATRIX (TablixBreakdown)
+               Row groups: operator_display_name (one group per location)
+               Column groups: transaction_type_name (dynamic, one per type)
+               Value cells: transaction_count (top) + total_amount (bottom)
+               Row total column: bg #E2EFDA, text #375623
+               Grand total row: bg #E2EFDA, text #375623
+               BR-13: transaction_type_id = 3 excluded in SP; will not appear in column groups.
+          ════════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablixBreakdown">
+            <DataSetName>dsBreakdown</DataSetName>
+            <TablixBody>
+              <TablixColumns>
+                <!-- Location column (1.5in) + dynamic columns per transaction type + Total column (1.1in) -->
+                <TablixColumn><Width>1.5in</Width></TablixColumn>
+                <TablixColumn><Width>1.1in</Width></TablixColumn>
+                <TablixColumn><Width>1.1in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+
+                <!-- Column header row -->
+                <TablixRow>
+                  <Height>0.22in</Height>
+                  <TablixCells>
+                    <!-- Location column header (static) -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="BrkHdrLocation">
+                          <Value>Location</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#AAAAAA</Color>
+                            <BackgroundColor>#333333</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Dynamic transaction type column header -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="BrkHdrTransactionType">
+                          <Value>=Fields!transaction_type_name.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#AAAAAA</Color>
+                            <BackgroundColor>#333333</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Row totals column header (static) -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="BrkHdrTotal">
+                          <Value>Total</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- Operator detail row — one per operator, alternating white/#F2F8FE -->
+                <TablixRow>
+                  <Height>0.30in</Height>
+                  <TablixCells>
+                    <!-- Operator name cell (row group header) -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="BrkDataOperatorName">
+                          <Value>=Fields!operator_display_name.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#1A1A1A</Color>
+                            <BackgroundColor>=IIF(RowNumber("BrkOperatorGroup") Mod 2 = 0, "#F2F8FE", "White")</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Value cell: transaction_count (top line) + total_amount (second line) -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="BrkValueCell">
+                          <Style>
+                            <BackgroundColor>=IIF(RowNumber("BrkOperatorGroup") Mod 2 = 0, "#F2F8FE", "White")</BackgroundColor>
+                          </Style>
+                          <ReportItems>
+                            <Textbox Name="BrkDataTransactionCount">
+                              <Value>=Sum(Fields!transaction_count.Value)</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#333333</Color>
+                                <Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.02in</Top><Left>0in</Left>
+                              <Width>1.05in</Width><Height>0.13in</Height>
+                            </Textbox>
+                            <Textbox Name="BrkDataTotalAmount">
+                              <Value>=Sum(Fields!total_amount.Value)</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+                                <Color>#666666</Color><Format>$#,##0.00</Format>
+                                <PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.16in</Top><Left>0in</Left>
+                              <Width>1.05in</Width><Height>0.12in</Height>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Row total cell (static — sums all types for this operator) -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="BrkRowTotalCell">
+                          <Style>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                          </Style>
+                          <ReportItems>
+                            <Textbox Name="BrkRowTotalCount">
+                              <Value>=Sum(Fields!transaction_count.Value, "BrkOperatorGroup")</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                                <Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.02in</Top><Left>0in</Left>
+                              <Width>1.05in</Width><Height>0.13in</Height>
+                            </Textbox>
+                            <Textbox Name="BrkRowTotalAmount">
+                              <Value>=Sum(Fields!total_amount.Value, "BrkOperatorGroup")</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                                <Format>$#,##0.00</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.16in</Top><Left>0in</Left>
+                              <Width>1.05in</Width><Height>0.12in</Height>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- Grand total row (static) — bg #E2EFDA, text #375623 -->
+                <TablixRow>
+                  <Height>0.28in</Height>
+                  <TablixCells>
+                    <!-- Grand total label -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="BrkGrandTotalLabel">
+                          <Value>Grand Total</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Grand total per transaction type column -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="BrkGrandTotalValueCell">
+                          <Style><BackgroundColor>#E2EFDA</BackgroundColor></Style>
+                          <ReportItems>
+                            <Textbox Name="BrkGrandTotalCount">
+                              <Value>=Sum(Fields!transaction_count.Value)</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                                <Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.02in</Top><Left>0in</Left>
+                              <Width>1.05in</Width><Height>0.13in</Height>
+                            </Textbox>
+                            <Textbox Name="BrkGrandTotalAmount">
+                              <Value>=Sum(Fields!total_amount.Value)</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                                <Format>$#,##0.00</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.16in</Top><Left>0in</Left>
+                              <Width>1.05in</Width><Height>0.12in</Height>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Overall grand total cell (sum all operators × all types) -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="BrkOverallGrandTotal">
+                          <Style><BackgroundColor>#E2EFDA</BackgroundColor></Style>
+                          <ReportItems>
+                            <Textbox Name="BrkOverallGrandTotalCount">
+                              <Value>=Sum(Fields!transaction_count.Value)</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                                <Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.02in</Top><Left>0in</Left>
+                              <Width>1.05in</Width><Height>0.13in</Height>
+                            </Textbox>
+                            <Textbox Name="BrkOverallGrandTotalAmount">
+                              <Value>=Sum(Fields!total_amount.Value)</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                                <Format>$#,##0.00</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.16in</Top><Left>0in</Left>
+                              <Width>1.05in</Width><Height>0.12in</Height>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+              </TablixRows>
+            </TablixBody>
+
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember/> <!-- Location (static row group header column) -->
+                <TablixMember>  <!-- Transaction type dynamic column group -->
+                  <DataGroupName>BrkTransTypeColGroup</DataGroupName>
+                  <Group Name="BrkTransTypeColGroup">
+                    <GroupExpressions>
+                      <GroupExpression>=Fields!transaction_type_name.Value</GroupExpression>
+                    </GroupExpressions>
+                  </Group>
+                  <SortExpressions>
+                    <SortExpression>
+                      <Value>=Fields!transaction_type_id.Value</Value>
+                      <Direction>Ascending</Direction>
+                    </SortExpression>
+                  </SortExpressions>
+                </TablixMember>
+                <TablixMember/> <!-- Row total column (static) -->
+              </TablixMembers>
+            </TablixColumnHierarchy>
+
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <!-- Column header row (static) -->
+                <TablixMember>
+                  <KeepWithGroup>After</KeepWithGroup>
+                  <RepeatOnNewPage>true</RepeatOnNewPage>
+                </TablixMember>
+                <!-- Operator row group — sorted by operator_display_name ASC -->
+                <TablixMember>
+                  <DataGroupName>BrkOperatorGroup</DataGroupName>
+                  <Group Name="BrkOperatorGroup">
+                    <GroupExpressions>
+                      <GroupExpression>=Fields!operator_display_name.Value</GroupExpression>
+                    </GroupExpressions>
+                  </Group>
+                  <SortExpressions>
+                    <SortExpression>
+                      <Value>=Fields!operator_display_name.Value</Value>
+                      <Direction>Ascending</Direction>
+                    </SortExpression>
+                  </SortExpressions>
+                </TablixMember>
+                <!-- Grand total row (static) -->
+                <TablixMember/>
+              </TablixMembers>
+            </TablixRowHierarchy>
+
+            <Top>8.35in</Top>
+            <Left>0in</Left>
+            <Width>10.5in</Width>
+          </Tablix>
+
+        </ReportItems>
+        <Height>12.5in</Height>
+        <Style/>
+      </Body>
+      <Width>10.5in</Width>
+      <Page>
+        <!-- Landscape Letter: PageWidth > PageHeight (11" × 8.5") -->
+        <PageWidth>11in</PageWidth>
+        <PageHeight>8.5in</PageHeight>
+        <LeftMargin>0.25in</LeftMargin>
+        <RightMargin>0.25in</RightMargin>
+        <TopMargin>0.25in</TopMargin>
+        <BottomMargin>0.25in</BottomMargin>
+        <Style/>
+      </Page>
+
+      <!-- ════════════════════════════════════════════════════════════════
+           PAGE HEADER (repeats on every page)
+           Compact repeat header: report title + org + period
+      ════════════════════════════════════════════════════════════════════ -->
+      <PageHeader>
+        <Height>0.5in</Height>
+        <PrintOnFirstPage>true</PrintOnFirstPage>
+        <PrintOnLastPage>true</PrintOnLastPage>
+        <ReportItems>
+          <Textbox Name="PageHdrTitle">
+            <Value>Route Performance Comparison  —  RPT-004</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#1A1A1A</Color>
+              <VerticalAlign>Middle</VerticalAlign>
+            </Style>
+            <Top>0.05in</Top><Left>0in</Left>
+            <Width>5in</Width><Height>0.2in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+          <Textbox Name="PageHdrPeriod">
+            <Value>="Period: " &amp; Format(Parameters!from_date.Value, "MM/dd/yyyy") &amp; " – " &amp; Format(Parameters!to_date.Value, "MM/dd/yyyy") &amp; "  ·  Metric: " &amp; Parameters!primary_metric.Label</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#555555</Color><VerticalAlign>Middle</VerticalAlign>
+            </Style>
+            <Top>0.28in</Top><Left>0in</Left>
+            <Width>6in</Width><Height>0.16in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+          <Textbox Name="PageHdrRuntime">
+            <Value>="Generated: " &amp; Format(Globals!ExecutionTime, "MM/dd/yyyy HH:mm") &amp; " UTC"</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#888888</Color><TextAlign>Right</TextAlign>
+            </Style>
+            <Top>0.05in</Top><Left>6.5in</Left>
+            <Width>4in</Width><Height>0.16in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+        </ReportItems>
+        <Style/>
+      </PageHeader>
+
+      <!-- ════════════════════════════════════════════════════════════════
+           PAGE FOOTER (repeats on every page)
+           Page X of Y  |  CONFIDENTIAL  |  PII disclaimer
+      ════════════════════════════════════════════════════════════════════ -->
+      <PageFooter>
+        <Height>0.35in</Height>
+        <PrintOnFirstPage>true</PrintOnFirstPage>
+        <PrintOnLastPage>true</PrintOnLastPage>
+        <ReportItems>
+
+          <!-- Left: Page X of Y -->
+          <Textbox Name="FooterPageNum">
+            <Value>="Page " &amp; Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+              <Color>#888888</Color><BackgroundColor>#F5F5F5</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign>
+              <BorderColor><Bottom>#DDDDDD</Bottom></BorderColor>
+              <BorderStyle><Bottom>Solid</Bottom></BorderStyle>
+            </Style>
+            <Top>0.05in</Top><Left>0in</Left>
+            <Width>2in</Width><Height>0.22in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+
+          <!-- Centre: CONFIDENTIAL -->
+          <Textbox Name="FooterConfidential">
+            <Value>CONFIDENTIAL</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#CC0000</Color>
+              <BackgroundColor>#F5F5F5</BackgroundColor>
+              <TextAlign>Center</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <BorderColor><Bottom>#DDDDDD</Bottom></BorderColor>
+              <BorderStyle><Bottom>Solid</Bottom></BorderStyle>
+            </Style>
+            <Top>0.05in</Top><Left>3.5in</Left>
+            <Width>3.5in</Width><Height>0.22in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+
+          <!-- Right: PII disclaimer -->
+          <Textbox Name="FooterPiiDisclaimer">
+            <Value>This report contains minimised PII — not for public disclosure</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#888888</Color><BackgroundColor>#F5F5F5</BackgroundColor>
+              <TextAlign>Right</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <FontStyle>Italic</FontStyle>
+              <BorderColor><Bottom>#DDDDDD</Bottom></BorderColor>
+              <BorderStyle><Bottom>Solid</Bottom></BorderStyle>
+            </Style>
+            <Top>0.05in</Top><Left>7.5in</Left>
+            <Width>3in</Width><Height>0.22in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+
+        </ReportItems>
+        <Style>
+          <BackgroundColor>#F5F5F5</BackgroundColor>
+          <BorderColor><Top>#DDDDDD</Top></BorderColor>
+          <BorderStyle><Top>Solid</Top></BorderStyle>
+        </Style>
+      </PageFooter>
+
+    </ReportSection>
+  </ReportSections>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       DATA SOURCES
+       GTW_GiftCards_DS — shared data source from RPT-001.
+       If already deployed from RPT-001, reuse existing shared data source.
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <DataSources>
+    <DataSource Name="GTW_GiftCards_DS">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=&lt;sql-server-hostname&gt;;Initial Catalog=GiftCards;Integrated Security=True;ApplicationIntent=ReadOnly</ConnectString>
+        <IntegratedSecurity>true</IntegratedSecurity>
+        <Prompt></Prompt>
+      </ConnectionProperties>
+      <rd:SecurityType>Integrated</rd:SecurityType>
+      <rd:DataSourceID>GTW_GiftCards_DS</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       DATA SETS (7 total)
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <DataSets>
+
+    <!-- dsRanking — one row per operator, ranked by primary_metric DESC
+         SP: gc.rpt_org_route_performance_ranking
+         Powers Part A Ranking Table
+         org_timezone_label and org_name are included for header display -->
+    <DataSet Name="dsRanking">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_route_performance_ranking</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id">
+            <Value>=Parameters!organization_id.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@from_date">
+            <Value>=Parameters!from_date.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@to_date">
+            <Value>=Parameters!to_date.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@operator_ids">
+            <Value>=IIF(Parameters!operator_ids.Count = 0, Nothing, Join(Parameters!operator_ids.Value, ","))</Value>
+          </QueryParameter>
+          <QueryParameter Name="@primary_metric">
+            <Value>=Parameters!primary_metric.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@compare_period">
+            <Value>=Parameters!compare_period.Value</Value>
+          </QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="rank"><DataField>rank</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="operator_id"><DataField>operator_id</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="operator_display_name"><DataField>operator_display_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="transaction_count"><DataField>transaction_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="total_credit_amount"><DataField>total_credit_amount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="total_debit_amount"><DataField>total_debit_amount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="total_fee"><DataField>total_fee</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="new_registrations"><DataField>new_registrations</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="active_customers_count"><DataField>active_customers_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="avg_transaction_value"><DataField>avg_transaction_value</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="primary_metric_value"><DataField>primary_metric_value</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="pct_of_org_total"><DataField>pct_of_org_total</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="prior_period_metric_value"><DataField>prior_period_metric_value</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="pct_change_vs_prior_period"><DataField>pct_change_vs_prior_period</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="org_name"><DataField>org_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="org_timezone_label"><DataField>org_timezone_label</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsTrend — one row per (operator × time_period)
+         SP: gc.rpt_org_route_performance_trend
+         Powers Part B line chart and tabular fallback
+         @compare_period not used in trend SP; @group_by_period controls period bucketing -->
+    <DataSet Name="dsTrend">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_route_performance_trend</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id">
+            <Value>=Parameters!organization_id.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@from_date">
+            <Value>=Parameters!from_date.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@to_date">
+            <Value>=Parameters!to_date.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@operator_ids">
+            <Value>=IIF(Parameters!operator_ids.Count = 0, Nothing, Join(Parameters!operator_ids.Value, ","))</Value>
+          </QueryParameter>
+          <QueryParameter Name="@primary_metric">
+            <Value>=Parameters!primary_metric.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@group_by_period">
+            <Value>=Parameters!group_by_period.Value</Value>
+          </QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="operator_id"><DataField>operator_id</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="operator_display_name"><DataField>operator_display_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="period_start"><DataField>period_start</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="period_label"><DataField>period_label</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="metric_value"><DataField>metric_value</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="cumulative_metric_value"><DataField>cumulative_metric_value</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="transaction_count"><DataField>transaction_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsBreakdown — one row per (operator × transaction_type)
+         SP: gc.rpt_org_route_performance_detail
+         Powers Part C transaction type breakdown matrix
+         @primary_metric, @compare_period, @group_by_period not applicable to breakdown SP -->
+    <DataSet Name="dsBreakdown">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_route_performance_detail</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id">
+            <Value>=Parameters!organization_id.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@from_date">
+            <Value>=Parameters!from_date.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@to_date">
+            <Value>=Parameters!to_date.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@operator_ids">
+            <Value>=IIF(Parameters!operator_ids.Count = 0, Nothing, Join(Parameters!operator_ids.Value, ","))</Value>
+          </QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="operator_id"><DataField>operator_id</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="operator_display_name"><DataField>operator_display_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="transaction_type_id"><DataField>transaction_type_id</DataField><rd:TypeName>System.Int16</rd:TypeName></Field>
+        <Field Name="transaction_type_name"><DataField>transaction_type_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="transaction_count"><DataField>transaction_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="total_amount"><DataField>total_amount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="total_fee"><DataField>total_fee</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="total_with_fee"><DataField>total_with_fee</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsOperators — populates P4 operator_ids multi-select
+         SP: gc.rpt_org_operators_lst — reused from RPT-001 (no modification needed) -->
+    <DataSet Name="dsOperators">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_operators_lst</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id">
+            <Value>=Parameters!organization_id.Value</Value>
+          </QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="operator_id"><DataField>operator_id</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="display_name"><DataField>display_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsMetricTypes — static 5-row inline dataset for P5 primary_metric dropdown
+         Values: 1=Transaction Volume, 2=Revenue, 3=New Registrations, 4=Fee Revenue, 5=Net Load -->
+    <DataSet Name="dsMetricTypes">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>Text</CommandType>
+        <CommandText>SELECT metric_value, metric_label FROM (VALUES
+  (1, N'Transaction Volume (Count)'),
+  (2, N'Revenue (Total Credit Amount)'),
+  (3, N'New Customer Registrations'),
+  (4, N'Fee Revenue'),
+  (5, N'Net Load (Credits minus Debits)')
+) AS m(metric_value, metric_label)
+ORDER BY metric_value</CommandText>
+      </Query>
+      <Fields>
+        <Field Name="metric_value"><DataField>metric_value</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="metric_label"><DataField>metric_label</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsPeriodTypes — static 3-row inline dataset for P6 group_by_period dropdown
+         Values: 1=Daily, 2=Weekly, 3=Monthly -->
+    <DataSet Name="dsPeriodTypes">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>Text</CommandType>
+        <CommandText>SELECT period_value, period_label FROM (VALUES
+  (1, N'Daily'),
+  (2, N'Weekly'),
+  (3, N'Monthly')
+) AS p(period_value, period_label)
+ORDER BY period_value</CommandText>
+      </Query>
+      <Fields>
+        <Field Name="period_value"><DataField>period_value</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="period_label"><DataField>period_label</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsComparePeriod — static 2-row inline dataset for P7 compare_period dropdown
+         Values: 0=No Comparison, 1=Compare to Prior Period -->
+    <DataSet Name="dsComparePeriod">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>Text</CommandType>
+        <CommandText>SELECT compare_value, compare_label FROM (VALUES
+  (0, N'No Comparison'),
+  (1, N'Compare to Prior Period')
+) AS c(compare_value, compare_label)
+ORDER BY compare_value</CommandText>
+      </Query>
+      <Fields>
+        <Field Name="compare_value"><DataField>compare_value</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="compare_label"><DataField>compare_label</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+  </DataSets>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PARAMETERS  (P1–P7, in dependency order)
+       P1 → P4 cascading (dsOperators depends on organization_id)
+       P2, P3, P5, P6, P7 independent
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <ReportParameters>
+
+    <!-- P1: organization_id — Integer, Required, Hidden in S2S mode
+         Passed as hidden URL parameter by calling portal. SP enforces org isolation
+         via org-hierarchy JOIN regardless. -->
+    <ReportParameter Name="organization_id">
+      <DataType>Integer</DataType>
+      <Nullable>false</Nullable>
+      <AllowBlank>false</AllowBlank>
+      <MultiValue>false</MultiValue>
+      <Hidden>false</Hidden>
+      <Prompt>Organization ID</Prompt>
+      <!-- Note: set Hidden=true in S2S deployment; role gate enforced by calling portal -->
+    </ReportParameter>
+
+    <!-- P2: from_date — DateTime, Required, Default: first day of current month (local time)
+         BR-10 auto-select for group_by_period is driven from this parameter. -->
+    <ReportParameter Name="from_date">
+      <DataType>DateTime</DataType>
+      <Nullable>false</Nullable>
+      <AllowBlank>false</AllowBlank>
+      <MultiValue>false</MultiValue>
+      <DefaultValue>
+        <Values>
+          <Value>=DateSerial(Year(Now()), Month(Now()), 1)</Value>
+        </Values>
+      </DefaultValue>
+      <Prompt>From Date</Prompt>
+    </ReportParameter>
+
+    <!-- P3: to_date — DateTime, Required, Default: today (Now())
+         V1: max 365 days from P2 — enforced by SP RAISERROR (severity 16).
+         V2: must be >= from_date — enforced by SP RAISERROR. -->
+    <ReportParameter Name="to_date">
+      <DataType>DateTime</DataType>
+      <Nullable>false</Nullable>
+      <AllowBlank>false</AllowBlank>
+      <MultiValue>false</MultiValue>
+      <DefaultValue>
+        <Values>
+          <Value>=Now()</Value>
+        </Values>
+      </DefaultValue>
+      <Prompt>To Date</Prompt>
+    </ReportParameter>
+
+    <!-- P4: operator_ids — String, Multi-value, Not required
+         Cascades from P1 via dsOperators. Default "(All)" = empty selection = SP receives NULL.
+         Valid values populated from dsOperators (value=operator_id, label=display_name). -->
+    <ReportParameter Name="operator_ids">
+      <DataType>String</DataType>
+      <Nullable>true</Nullable>
+      <AllowBlank>true</AllowBlank>
+      <MultiValue>true</MultiValue>
+      <DefaultValue>
+        <!-- Default: all operators — empty selection passes NULL to SP (= All) -->
+        <Values>
+          <Value></Value>
+        </Values>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsOperators</DataSetName>
+          <ValueField>operator_id</ValueField>
+          <LabelField>display_name</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Operator(s)</Prompt>
+    </ReportParameter>
+
+    <!-- P5: primary_metric — Integer, Single-select, Not required, Default 2 (Revenue)
+         V5: SP applies CASE to default invalid values to 2.
+         Valid values from dsMetricTypes (static inline). -->
+    <ReportParameter Name="primary_metric">
+      <DataType>Integer</DataType>
+      <Nullable>false</Nullable>
+      <AllowBlank>false</AllowBlank>
+      <MultiValue>false</MultiValue>
+      <DefaultValue>
+        <Values>
+          <Value>2</Value>
+        </Values>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsMetricTypes</DataSetName>
+          <ValueField>metric_value</ValueField>
+          <LabelField>metric_label</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Primary Metric</Prompt>
+    </ReportParameter>
+
+    <!-- P6: group_by_period — Integer, Single-select, Not required
+         Default expression implements BR-10 auto-select logic:
+           if date range <= 31 days → Daily (1)
+           if 32–90 days           → Weekly (2)
+           if > 90 days            → Monthly (3)
+         V6: SP defaults invalid values to 2 (Weekly).
+         Valid values from dsPeriodTypes (static inline). -->
+    <ReportParameter Name="group_by_period">
+      <DataType>Integer</DataType>
+      <Nullable>false</Nullable>
+      <AllowBlank>false</AllowBlank>
+      <MultiValue>false</MultiValue>
+      <DefaultValue>
+        <Values>
+          <Value>=IIF(DateDiff("d", Parameters!from_date.Value, Parameters!to_date.Value) &lt;= 31, 1, IIF(DateDiff("d", Parameters!from_date.Value, Parameters!to_date.Value) &lt;= 90, 2, 3))</Value>
+        </Values>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsPeriodTypes</DataSetName>
+          <ValueField>period_value</ValueField>
+          <LabelField>period_label</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Group By Period</Prompt>
+    </ReportParameter>
+
+    <!-- P7: compare_period — Integer, Single-select, Not required, Default 0 (No Comparison)
+         When 1: prior_period_metric_value and pct_change_vs_prior_period columns are shown in Part A.
+         When 0: those columns are hidden via Visibility.Hidden expression in TablixRanking.
+         Valid values from dsComparePeriod (static inline). -->
+    <ReportParameter Name="compare_period">
+      <DataType>Integer</DataType>
+      <Nullable>false</Nullable>
+      <AllowBlank>false</AllowBlank>
+      <MultiValue>false</MultiValue>
+      <DefaultValue>
+        <Values>
+          <Value>0</Value>
+        </Values>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsComparePeriod</DataSetName>
+          <ValueField>compare_value</ValueField>
+          <LabelField>compare_label</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Compare Period</Prompt>
+    </ReportParameter>
+
+  </ReportParameters>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       REPORT LANGUAGE / LOCALIZATION
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <Language>en-US</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+
+</Report>

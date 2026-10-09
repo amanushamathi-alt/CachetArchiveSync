@@ -1,0 +1,1631 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  RPT-003 — Expiring Cards Report
+  SSRS Report Definition Language (RDL)
+  Spec: coding-agent/specs/web-reports/RPT-003-expiring-cards-report.md
+  Namespace: http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition
+  Repository: reports/organization/RPT-003-expiring-cards-report.rdl
+
+  Deployment target: SSRS Web Portal → /GTW/GiftCards/RPT-003-Expiring-Cards-Report.rdl
+  Data source: GTW_GiftCards_DS (Windows Integrated Security, ReadOnly, GiftCards DB)
+
+  Role gate (enforced by calling portal before rendering URL):
+    DAWN.usm.role.role_id IN (8=Owner, 9=Supervisor) WHERE role_type_id = 3
+
+  Datasets:
+    dsKPI               → gc.rpt_org_expiring_cards_kpi
+    dsLocationSummary   → gc.rpt_org_expiring_cards_location_summary
+    dsDetail            → gc.rpt_org_expiring_cards_detail
+    dsOperators         → gc.rpt_org_operators_lst
+    dsCardStatuses      → inline SELECT from mst.card_status
+    dsExpiryWindows     → inline static dataset
+
+  Parameters (P1–P6):
+    organization_id, as_of_date, operator_ids (multi), expiry_window_days,
+    min_balance, card_status_ids (multi)
+
+  Conditional formatting (Part B rows):
+    days_to_expiry < 0        → row bg #FDECEA, days text #E65100
+    days_to_expiry 0–30       → row bg #FFF2CC
+    days_to_expiry > 30       → alternating White/#F2F8FE
+    is_renewal_eligible = 1   → R? cell bg #E2EFDA
+
+  Security:
+    PII: customer_display = first_name + ' ' + last_initial + '.' only
+    No Vault JOIN, no PAN, no full last name, no phone, no DOB
+    card_number_redacted from gc.physical_card only
+    card_status_id = 5 (Replaced) excluded from all SPs (BR-7)
+    org isolation via parent_organization_id JOIN (BR-1)
+    ExecutionLog3 auto-audit (CC6.1, CC7.2)
+
+  TraceCounts / GTW Gift Card System — 2026-05-25
+-->
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       REPORT PROPERTIES
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <ReportID>RPT-003</ReportID>
+  <Description>Expiring Cards Report — Organisation-level physical gift card expiry tracking with balance-at-risk view. Owner and Supervisor access only.</Description>
+  <Author>TraceCounts GTW System</Author>
+  <AutoRefresh>0</AutoRefresh>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+
+          <!-- ════════════════════════════════════════════════════════════
+               PAGE HEADER TEXTBOX — Report title, org, as-of date, window
+          ════════════════════════════════════════════════════════════════ -->
+          <Rectangle Name="ReportHeaderBand">
+            <Style>
+              <BackgroundColor>#1A1A1A</BackgroundColor>
+            </Style>
+            <Top>0in</Top>
+            <Left>0in</Left>
+            <Width>10.5in</Width>
+            <Height>0.9in</Height>
+            <ReportItems>
+              <Textbox Name="TextboxTitle">
+                <Value>Expiring Cards Report</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>13pt</FontSize>
+                  <FontWeight>Bold</FontWeight>
+                  <Color>White</Color>
+                  <VerticalAlign>Middle</VerticalAlign>
+                </Style>
+                <Top>0.05in</Top>
+                <Left>0.1in</Left>
+                <Width>5in</Width>
+                <Height>0.22in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxOrgLine">
+                <Value>=Fields!org_name.Value &amp; "  ·  As of Date: " &amp; Format(Parameters!as_of_date.Value, "MM/dd/yyyy") &amp; "  ·  Expiry Window: " &amp; Parameters!expiry_window_days.Value &amp; " days  ·  Timezone: (UTC" &amp; Fields!org_timezone_offset.Value &amp; ")"</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8.5pt</FontSize>
+                  <Color>#AAAAAA</Color>
+                  <VerticalAlign>Middle</VerticalAlign>
+                </Style>
+                <DataSetName>dsKPI</DataSetName>
+                <Top>0.28in</Top>
+                <Left>0.1in</Left>
+                <Width>6.5in</Width>
+                <Height>0.16in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxFiltersLine">
+                <Value>="Filters: " &amp; IIF(Parameters!operator_ids.Count = 0, "All Operators", Parameters!operator_ids.Count &amp; " operator(s)") &amp; "  ·  Min Balance: $" &amp; Format(Parameters!min_balance.Value, "0.00") &amp; "  ·  Status: " &amp; Join(Parameters!card_status_ids.Value, ", ")</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8pt</FontSize>
+                  <Color>#888888</Color>
+                  <VerticalAlign>Middle</VerticalAlign>
+                </Style>
+                <Top>0.45in</Top>
+                <Left>0.1in</Left>
+                <Width>6.5in</Width>
+                <Height>0.16in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <!-- Right-aligned run metadata -->
+              <Textbox Name="TextboxGenerated">
+                <Value>="Generated: " &amp; Format(Globals!ExecutionTime, "MM/dd/yyyy HH:mm") &amp; " UTC"</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8.5pt</FontSize>
+                  <Color>#AAAAAA</Color>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+                <Top>0.05in</Top>
+                <Left>5.3in</Left>
+                <Width>5.1in</Width>
+                <Height>0.16in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxUser">
+                <Value>="By: " &amp; User!UserID</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8.5pt</FontSize>
+                  <Color>#AAAAAA</Color>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+                <Top>0.22in</Top>
+                <Left>5.3in</Left>
+                <Width>5.1in</Width>
+                <Height>0.16in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxReportID">
+                <Value>Report ID: RPT-003  ·  SSRS Web Portal</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8pt</FontSize>
+                  <Color>#888888</Color>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+                <Top>0.39in</Top>
+                <Left>5.3in</Left>
+                <Width>5.1in</Width>
+                <Height>0.14in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+            </ReportItems>
+          </Rectangle>
+
+          <!-- ════════════════════════════════════════════════════════════
+               SECTION LABEL — KPI EXECUTIVE SUMMARY
+          ════════════════════════════════════════════════════════════════ -->
+          <Textbox Name="TextboxKpiSectionLabel">
+            <Value>EXECUTIVE SUMMARY — KPI TILES</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily>
+              <FontSize>8.5pt</FontSize>
+              <FontWeight>Bold</FontWeight>
+              <Color>#1A1A1A</Color>
+              <BackgroundColor>#D6E4F0</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign>
+              <PaddingLeft>10pt</PaddingLeft>
+            </Style>
+            <Top>1.0in</Top>
+            <Left>0in</Left>
+            <Width>7in</Width>
+            <Height>0.22in</Height>
+          </Textbox>
+          <Textbox Name="TextboxKpiDatasetLabel">
+            <Value>dsKPI  ·  gc.rpt_org_expiring_cards_kpi</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily>
+              <FontSize>7.5pt</FontSize>
+              <Color>#555555</Color>
+              <BackgroundColor>#D6E4F0</BackgroundColor>
+              <TextAlign>Right</TextAlign>
+              <VerticalAlign>Middle</VerticalAlign>
+              <PaddingRight>8pt</PaddingRight>
+            </Style>
+            <Top>1.0in</Top>
+            <Left>7in</Left>
+            <Width>3.5in</Width>
+            <Height>0.22in</Height>
+          </Textbox>
+
+          <!-- ════════════════════════════════════════════════════════════
+               KPI TABLIX — dsKPI (single data row, 5 KPI cells)
+               Rendered as a single-row tablix; each cell is a rectangle
+               with left accent bar + label + value + subtitle.
+          ════════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablixKPI">
+            <DataSetName>dsKPI</DataSetName>
+            <TablixBody>
+              <TablixColumns>
+                <!-- Column widths: 5 tiles across 10.5in; tile 4 wider for long label -->
+                <TablixColumn><Width>2.0in</Width></TablixColumn>
+                <TablixColumn><Width>2.0in</Width></TablixColumn>
+                <TablixColumn><Width>2.0in</Width></TablixColumn>
+                <TablixColumn><Width>2.3in</Width></TablixColumn>
+                <TablixColumn><Width>2.0in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow>
+                  <Height>1.0in</Height>
+                  <TablixCells>
+
+                    <!-- KPI 1: CARDS EXPIRING IN WINDOW — accent #1A1A1A -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile1">
+                          <Style>
+                            <BackgroundColor>White</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile1Accent">
+                              <Style><BackgroundColor>#1A1A1A</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>1.0in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile1Label">
+                              <Value>CARDS EXPIRING IN WINDOW</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                                <Color>#555555</Color><VerticalAlign>Middle</VerticalAlign>
+                                <PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.1in</Top><Left>0.1in</Left>
+                              <Width>1.85in</Width><Height>0.2in</Height>
+                            </Textbox>
+                            <Textbox Name="KpiTile1Value">
+                              <Value>=Fields!cards_expiring_in_window.Value</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#1A1A1A</Color>
+                                <Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.28in</Top><Left>0.1in</Left>
+                              <Width>1.85in</Width><Height>0.42in</Height>
+                            </Textbox>
+                            <Textbox Name="KpiTile1Sub">
+                              <Value>Active cards expiring within window</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+                                <Color>#888888</Color><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.72in</Top><Left>0.1in</Left>
+                              <Width>1.85in</Width><Height>0.2in</Height>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                    <!-- KPI 2: CARDS WITH BALANCE > $0 — accent #375623 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile2">
+                          <Style>
+                            <BackgroundColor>White</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile2Accent">
+                              <Style><BackgroundColor>#375623</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>1.0in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile2Label">
+                              <Value>CARDS WITH BALANCE &gt; $0</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                                <Color>#555555</Color><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.1in</Top><Left>0.1in</Left>
+                              <Width>1.85in</Width><Height>0.2in</Height>
+                            </Textbox>
+                            <Textbox Name="KpiTile2Value">
+                              <Value>=Fields!cards_in_window_with_balance.Value</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                                <Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.28in</Top><Left>0.1in</Left>
+                              <Width>1.85in</Width><Height>0.42in</Height>
+                            </Textbox>
+                            <Textbox Name="KpiTile2Sub">
+                              <Value>=Format(Fields!total_balance_at_risk_in_window.Value, "$#,##0.00") &amp; " total balance at risk"</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+                                <Color>#888888</Color><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.72in</Top><Left>0.1in</Left>
+                              <Width>1.85in</Width><Height>0.2in</Height>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                    <!-- KPI 3: AVG BALANCE AT RISK — accent #C45911 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile3">
+                          <Style>
+                            <BackgroundColor>White</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile3Accent">
+                              <Style><BackgroundColor>#C45911</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>1.0in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile3Label">
+                              <Value>AVG BALANCE AT RISK</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                                <Color>#555555</Color><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.1in</Top><Left>0.1in</Left>
+                              <Width>1.85in</Width><Height>0.2in</Height>
+                            </Textbox>
+                            <Textbox Name="KpiTile3Value">
+                              <Value>=Fields!avg_balance_at_expiry_risk.Value</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#C45911</Color>
+                                <Format>$#,##0.00</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.28in</Top><Left>0.1in</Left>
+                              <Width>1.85in</Width><Height>0.42in</Height>
+                            </Textbox>
+                            <Textbox Name="KpiTile3Sub">
+                              <Value>AVG current_balance where balance &gt; $0</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+                                <Color>#888888</Color><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.72in</Top><Left>0.1in</Left>
+                              <Width>1.85in</Width><Height>0.2in</Height>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                    <!-- KPI 4: ALREADY EXPIRED WITH BALANCE — red-tinted tile #FDECEA, accent #E65100 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile4">
+                          <Style>
+                            <BackgroundColor>#FDECEA</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile4Accent">
+                              <Style><BackgroundColor>#E65100</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>1.0in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile4Label">
+                              <Value>ALREADY EXPIRED WITH BALANCE</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                                <Color>#555555</Color><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.1in</Top><Left>0.1in</Left>
+                              <Width>2.15in</Width><Height>0.2in</Height>
+                            </Textbox>
+                            <Textbox Name="KpiTile4Value">
+                              <Value>=Fields!already_expired_with_balance_count.Value</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#E65100</Color>
+                                <Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.28in</Top><Left>0.1in</Left>
+                              <Width>2.15in</Width><Height>0.42in</Height>
+                            </Textbox>
+                            <Textbox Name="KpiTile4Sub">
+                              <Value>=Format(Fields!already_expired_with_balance_total.Value, "$#,##0.00") &amp; " regulatory exposure"</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+                                <Color>#888888</Color><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.72in</Top><Left>0.1in</Left>
+                              <Width>2.15in</Width><Height>0.2in</Height>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                    <!-- KPI 5: RENEWAL ELIGIBLE NOW — accent #375623 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile5">
+                          <Style>
+                            <BackgroundColor>White</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile5Accent">
+                              <Style><BackgroundColor>#375623</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>1.0in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile5Label">
+                              <Value>RENEWAL ELIGIBLE NOW</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                                <Color>#555555</Color><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.1in</Top><Left>0.1in</Left>
+                              <Width>1.85in</Width><Height>0.2in</Height>
+                            </Textbox>
+                            <Textbox Name="KpiTile5Value">
+                              <Value>=Fields!renewal_eligible_count.Value</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>22pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                                <Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.28in</Top><Left>0.1in</Left>
+                              <Width>1.85in</Width><Height>0.42in</Height>
+                            </Textbox>
+                            <Textbox Name="KpiTile5Sub">
+                              <Value>Issued ≥ 6 months  ·  status IN (Active, Expired)  (BR-6)</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+                                <Color>#888888</Color><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.72in</Top><Left>0.1in</Left>
+                              <Width>1.85in</Width><Height>0.2in</Height>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                  </TablixCells>
+                </TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember/><TablixMember/><TablixMember/>
+                <TablixMember/><TablixMember/>
+              </TablixMembers>
+            </TablixColumnHierarchy>
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <TablixMember>
+                  <DataGroupName>KpiGroup</DataGroupName>
+                  <Group Name="KpiGroup"/>
+                </TablixMember>
+              </TablixMembers>
+            </TablixRowHierarchy>
+            <Top>1.25in</Top>
+            <Left>0in</Left>
+            <Width>10.5in</Width>
+            <Height>1.0in</Height>
+          </Tablix>
+
+          <!-- ════════════════════════════════════════════════════════════
+               SECTION LABEL — PART A
+          ════════════════════════════════════════════════════════════════ -->
+          <Textbox Name="TextboxPartASectionLabel">
+            <Value>PART A — LOCATION × EXPIRY WINDOW SUMMARY</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#1A1A1A</Color>
+              <BackgroundColor>#D6E4F0</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign><PaddingLeft>10pt</PaddingLeft>
+            </Style>
+            <Top>2.35in</Top><Left>0in</Left>
+            <Width>7.5in</Width><Height>0.22in</Height>
+          </Textbox>
+          <Textbox Name="TextboxPartADatasetLabel">
+            <Value>dsLocationSummary  ·  gc.rpt_org_expiring_cards_location_summary</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#555555</Color><BackgroundColor>#D6E4F0</BackgroundColor>
+              <TextAlign>Right</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <PaddingRight>8pt</PaddingRight>
+            </Style>
+            <Top>2.35in</Top><Left>7.5in</Left>
+            <Width>3in</Width><Height>0.22in</Height>
+          </Textbox>
+
+          <!-- ════════════════════════════════════════════════════════════
+               PART A — LOCATION × EXPIRY WINDOW MATRIX TABLIX
+               Row group: operator_display_name
+               Column group: window_col_sort (0–5, BR-14 always all 6)
+               Sorted: operator_display_name ASC, window_col_sort ASC
+               Each cell: card_count (top) + total_balance (bottom)
+          ════════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablixPartA">
+            <DataSetName>dsLocationSummary</DataSetName>
+            <TablixBody>
+              <TablixColumns>
+                <!-- Location column + 6 window columns + Total column -->
+                <TablixColumn><Width>1.5in</Width></TablixColumn>  <!-- Location -->
+                <TablixColumn><Width>1.4in</Width></TablixColumn>  <!-- Window col group -->
+                <TablixColumn><Width>1.4in</Width></TablixColumn>  <!-- Total (row total) -->
+              </TablixColumns>
+              <TablixRows>
+                <!-- Column header row -->
+                <TablixRow>
+                  <Height>0.25in</Height>
+                  <TablixCells>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="TextboxPartAHdrLocation">
+                          <Value>Location</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>White</Color>
+                            <BackgroundColor>#1A1A1A</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <!-- Column group header: window_col_label from dsLocationSummary -->
+                        <Textbox Name="TextboxPartAHdrWindow">
+                          <Value>=Fields!window_col_label.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight>
+                            <Color>=IIF(Fields!window_col_sort.Value = 0, "#FFAAAA", "White")</Color>
+                            <BackgroundColor>#1A1A1A</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="TextboxPartAHdrTotal">
+                          <Value>Total</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>White</Color>
+                            <BackgroundColor>#1A1A1A</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+                <!-- Data row (cell shows count + balance) -->
+                <TablixRow>
+                  <Height>0.32in</Height>
+                  <TablixCells>
+                    <!-- Location name (row group header) -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="TextboxPartALocation">
+                          <Value>=Fields!operator_display_name.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#333333</Color>
+                            <BackgroundColor>=IIF(RowNumber("LocationGroup") Mod 2 = 0, "#F2F8FE", "White")</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Window cell: count + balance -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="RectPartACell">
+                          <Style>
+                            <BackgroundColor>=IIF(RowNumber("LocationGroup") Mod 2 = 0, "#F2F8FE", "White")</BackgroundColor>
+                          </Style>
+                          <ReportItems>
+                            <Textbox Name="TextboxPartACellCount">
+                              <Value>=Sum(Fields!card_count.Value)</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#333333</Color>
+                                <Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.02in</Top><Left>0in</Left>
+                              <Width>1.35in</Width><Height>0.14in</Height>
+                            </Textbox>
+                            <Textbox Name="TextboxPartACellBalance">
+                              <Value>=Sum(Fields!total_balance.Value)</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+                                <Color>#666666</Color><Format>$#,##0.00</Format>
+                                <PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.17in</Top><Left>0in</Left>
+                              <Width>1.35in</Width><Height>0.13in</Height>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- Row Total -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="RectPartARowTotal">
+                          <Style>
+                            <BackgroundColor>=IIF(RowNumber("LocationGroup") Mod 2 = 0, "#F2F8FE", "White")</BackgroundColor>
+                          </Style>
+                          <ReportItems>
+                            <Textbox Name="TextboxPartARowTotalCount">
+                              <Value>=Sum(Fields!card_count.Value, "LocationGroup")</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#333333</Color>
+                                <Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.02in</Top><Left>0in</Left>
+                              <Width>1.35in</Width><Height>0.14in</Height>
+                            </Textbox>
+                            <Textbox Name="TextboxPartARowTotalBalance">
+                              <Value>=Sum(Fields!total_balance.Value, "LocationGroup")</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+                                <Color>#666666</Color><Format>$#,##0.00</Format>
+                                <PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.17in</Top><Left>0in</Left>
+                              <Width>1.35in</Width><Height>0.13in</Height>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+                <!-- Column Total row (grand total) -->
+                <TablixRow>
+                  <Height>0.32in</Height>
+                  <TablixCells>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="TextboxPartAColTotalLabel">
+                          <Value>Column Total</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="RectPartAColTotalCell">
+                          <Style><BackgroundColor>#E2EFDA</BackgroundColor></Style>
+                          <ReportItems>
+                            <Textbox Name="TextboxPartAColTotalCount">
+                              <Value>=Sum(Fields!card_count.Value)</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                                <Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.02in</Top><Left>0in</Left>
+                              <Width>1.35in</Width><Height>0.14in</Height>
+                            </Textbox>
+                            <Textbox Name="TextboxPartAColTotalBalance">
+                              <Value>=Sum(Fields!total_balance.Value)</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                                <Format>$#,##0.00</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.17in</Top><Left>0in</Left>
+                              <Width>1.35in</Width><Height>0.13in</Height>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="RectPartAGrandTotal">
+                          <Style><BackgroundColor>#E2EFDA</BackgroundColor></Style>
+                          <ReportItems>
+                            <Textbox Name="TextboxPartAGrandTotalCount">
+                              <Value>=Sum(Fields!card_count.Value)</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                                <Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.02in</Top><Left>0in</Left>
+                              <Width>1.35in</Width><Height>0.14in</Height>
+                            </Textbox>
+                            <Textbox Name="TextboxPartAGrandTotalBalance">
+                              <Value>=Sum(Fields!total_balance.Value)</Value>
+                              <Style>
+                                <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+                                <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                                <Format>$#,##0.00</Format><PaddingLeft>4pt</PaddingLeft>
+                              </Style>
+                              <Top>0.17in</Top><Left>0in</Left>
+                              <Width>1.35in</Width><Height>0.13in</Height>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember/> <!-- Location (static, row group header column) -->
+                <TablixMember>  <!-- window_col_sort column group -->
+                  <DataGroupName>WindowGroup</DataGroupName>
+                  <Group Name="WindowGroup">
+                    <GroupExpressions>
+                      <GroupExpression>=Fields!window_col_sort.Value</GroupExpression>
+                    </GroupExpressions>
+                  </Group>
+                  <SortExpressions>
+                    <SortExpression>
+                      <Value>=Fields!window_col_sort.Value</Value>
+                      <Direction>Ascending</Direction>
+                    </SortExpression>
+                  </SortExpressions>
+                </TablixMember>
+                <TablixMember/> <!-- Row total column (static) -->
+              </TablixMembers>
+            </TablixColumnHierarchy>
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <TablixMember/> <!-- Header row (static) -->
+                <TablixMember>  <!-- Location row group -->
+                  <DataGroupName>LocationGroup</DataGroupName>
+                  <Group Name="LocationGroup">
+                    <GroupExpressions>
+                      <GroupExpression>=Fields!operator_display_name.Value</GroupExpression>
+                    </GroupExpressions>
+                  </Group>
+                  <SortExpressions>
+                    <SortExpression>
+                      <Value>=Fields!operator_display_name.Value</Value>
+                      <Direction>Ascending</Direction>
+                    </SortExpression>
+                  </SortExpressions>
+                </TablixMember>
+                <TablixMember/> <!-- Column total row (static) -->
+              </TablixMembers>
+            </TablixRowHierarchy>
+            <Top>2.6in</Top>
+            <Left>0in</Left>
+            <Width>10.5in</Width>
+          </Tablix>
+
+          <!-- ════════════════════════════════════════════════════════════
+               SECTION LABEL — PART B
+          ════════════════════════════════════════════════════════════════ -->
+          <Textbox Name="TextboxPartBSectionLabel">
+            <Value>PART B — CARD DETAIL  (grouped by Location, sorted days_to_expiry ASC — most urgent first)</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#1A1A1A</Color>
+              <BackgroundColor>#D6E4F0</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign><PaddingLeft>10pt</PaddingLeft>
+            </Style>
+            <Top>4.0in</Top><Left>0in</Left>
+            <Width>7.5in</Width><Height>0.22in</Height>
+          </Textbox>
+          <Textbox Name="TextboxPartBDatasetLabel">
+            <Value>dsDetail  ·  gc.rpt_org_expiring_cards_detail</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#555555</Color><BackgroundColor>#D6E4F0</BackgroundColor>
+              <TextAlign>Right</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <PaddingRight>8pt</PaddingRight>
+            </Style>
+            <Top>4.0in</Top><Left>7.5in</Left>
+            <Width>3in</Width><Height>0.22in</Height>
+          </Textbox>
+
+          <!-- ════════════════════════════════════════════════════════════
+               PART B — CARD DETAIL TABLIX
+               Row group: operator_display_name (group header)
+               Detail rows: one per physical card
+               Sorted: operator_display_name ASC, days_to_expiry ASC
+
+               Conditional row background (BackgroundColor expression):
+                 days_to_expiry < 0        → #FDECEA
+                 days_to_expiry 0–30       → #FFF2CC
+                 days_to_expiry > 30       → alternating White / #F2F8FE
+
+               Days cell color:
+                 days_to_expiry < 0        → #E65100
+
+               R? cell background:
+                 is_renewal_eligible = 1   → #E2EFDA (green)
+                 else                      → Transparent
+
+               Columns:
+                 Card ID | Card # | Customer | Issued | Expires | Days | Status | Balance | R?
+          ════════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablixPartB">
+            <DataSetName>dsDetail</DataSetName>
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>0.65in</Width></TablixColumn>   <!-- Card ID -->
+                <TablixColumn><Width>0.9in</Width></TablixColumn>    <!-- Card # (redacted) -->
+                <TablixColumn><Width>1.2in</Width></TablixColumn>    <!-- Customer (display) -->
+                <TablixColumn><Width>1.1in</Width></TablixColumn>    <!-- Issued (local) -->
+                <TablixColumn><Width>1.1in</Width></TablixColumn>    <!-- Expires (local) -->
+                <TablixColumn><Width>0.6in</Width></TablixColumn>    <!-- Days to expiry -->
+                <TablixColumn><Width>0.9in</Width></TablixColumn>    <!-- Card Status -->
+                <TablixColumn><Width>0.9in</Width></TablixColumn>    <!-- Balance -->
+                <TablixColumn><Width>0.5in</Width></TablixColumn>    <!-- R? (renewal eligible) -->
+                <TablixColumn><Width>2.65in</Width></TablixColumn>   <!-- Padding to fill 10.5in -->
+              </TablixColumns>
+              <TablixRows>
+                <!-- Column header row -->
+                <TablixRow>
+                  <Height>0.22in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="HdrCardId"><Value>Card ID</Value>
+                      <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight><Color>White</Color><BackgroundColor>#1A1A1A</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HdrCardNum"><Value>Card #</Value>
+                      <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight><Color>White</Color><BackgroundColor>#1A1A1A</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HdrCustomer"><Value>Customer</Value>
+                      <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight><Color>White</Color><BackgroundColor>#1A1A1A</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HdrIssued"><Value>Issued</Value>
+                      <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight><Color>White</Color><BackgroundColor>#1A1A1A</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HdrExpires"><Value>Expires</Value>
+                      <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight><Color>White</Color><BackgroundColor>#1A1A1A</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HdrDays"><Value>Days</Value>
+                      <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight><Color>White</Color><BackgroundColor>#1A1A1A</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HdrStatus"><Value>Status</Value>
+                      <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight><Color>White</Color><BackgroundColor>#1A1A1A</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HdrBalance"><Value>Balance</Value>
+                      <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight><Color>White</Color><BackgroundColor>#1A1A1A</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HdrRenewal"><Value>R?</Value>
+                      <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><FontWeight>Bold</FontWeight><Color>White</Color><BackgroundColor>#1A1A1A</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HdrPad"><Value></Value>
+                      <Style><BackgroundColor>#1A1A1A</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- Detail data row — conditional background per days_to_expiry -->
+                <TablixRow>
+                  <Height>0.2in</Height>
+                  <TablixCells>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataCardId">
+                          <Value>=Fields!physical_card_id.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>#333333</Color><PaddingLeft>3pt</PaddingLeft>
+                            <VerticalAlign>Middle</VerticalAlign>
+                            <BackgroundColor>=IIF(Fields!days_to_expiry.Value &lt; 0, "#FDECEA", IIF(Fields!days_to_expiry.Value &lt;= 30, "#FFF2CC", IIF(RowNumber(Nothing) Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataCardNum">
+                          <Value>=Fields!card_number_redacted.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>#333333</Color><PaddingLeft>3pt</PaddingLeft>
+                            <VerticalAlign>Middle</VerticalAlign>
+                            <BackgroundColor>=IIF(Fields!days_to_expiry.Value &lt; 0, "#FDECEA", IIF(Fields!days_to_expiry.Value &lt;= 30, "#FFF2CC", IIF(RowNumber(Nothing) Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataCustomer">
+                          <!-- customer_display = first_name + ' ' + last_initial + '.' — BR-12, no Vault -->
+                          <Value>=Fields!customer_display.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>#333333</Color><PaddingLeft>3pt</PaddingLeft>
+                            <VerticalAlign>Middle</VerticalAlign>
+                            <BackgroundColor>=IIF(Fields!days_to_expiry.Value &lt; 0, "#FDECEA", IIF(Fields!days_to_expiry.Value &lt;= 30, "#FFF2CC", IIF(RowNumber(Nothing) Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataIssued">
+                          <!-- Display local date per BR-3 -->
+                          <Value>=Format(Fields!issued_date_local.Value, "MM/dd/yyyy HH:mm")</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>#333333</Color><PaddingLeft>3pt</PaddingLeft>
+                            <VerticalAlign>Middle</VerticalAlign>
+                            <BackgroundColor>=IIF(Fields!days_to_expiry.Value &lt; 0, "#FDECEA", IIF(Fields!days_to_expiry.Value &lt;= 30, "#FFF2CC", IIF(RowNumber(Nothing) Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataExpires">
+                          <Value>=Format(Fields!expiry_date_local.Value, "MM/dd/yyyy HH:mm")</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>#333333</Color><PaddingLeft>3pt</PaddingLeft>
+                            <VerticalAlign>Middle</VerticalAlign>
+                            <BackgroundColor>=IIF(Fields!days_to_expiry.Value &lt; 0, "#FDECEA", IIF(Fields!days_to_expiry.Value &lt;= 30, "#FFF2CC", IIF(RowNumber(Nothing) Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <!-- Days: negative = already expired; text alert orange if negative -->
+                        <Textbox Name="DataDays">
+                          <Value>=Fields!days_to_expiry.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>=IIF(Fields!days_to_expiry.Value &lt; 0, "#E65100", "#333333")</Color>
+                            <Format>#,##0</Format>
+                            <PaddingLeft>3pt</PaddingLeft>
+                            <VerticalAlign>Middle</VerticalAlign>
+                            <BackgroundColor>=IIF(Fields!days_to_expiry.Value &lt; 0, "#FDECEA", IIF(Fields!days_to_expiry.Value &lt;= 30, "#FFF2CC", IIF(RowNumber(Nothing) Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataStatus">
+                          <Value>=Fields!card_status_name.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>#333333</Color><PaddingLeft>3pt</PaddingLeft>
+                            <VerticalAlign>Middle</VerticalAlign>
+                            <BackgroundColor>=IIF(Fields!days_to_expiry.Value &lt; 0, "#FDECEA", IIF(Fields!days_to_expiry.Value &lt;= 30, "#FFF2CC", IIF(RowNumber(Nothing) Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataBalance">
+                          <Value>=Fields!current_balance.Value</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <Color>#333333</Color><Format>$#,##0.00</Format>
+                            <PaddingLeft>3pt</PaddingLeft>
+                            <VerticalAlign>Middle</VerticalAlign>
+                            <BackgroundColor>=IIF(Fields!days_to_expiry.Value &lt; 0, "#FDECEA", IIF(Fields!days_to_expiry.Value &lt;= 30, "#FFF2CC", IIF(RowNumber(Nothing) Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- R? cell — green bg if renewal eligible, else transparent on row bg -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataRenewal">
+                          <Value>=IIF(Fields!is_renewal_eligible.Value, "Y", "N")</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>=IIF(Fields!is_renewal_eligible.Value, "Bold", "Normal")</FontWeight>
+                            <Color>=IIF(Fields!is_renewal_eligible.Value, "#375623", "#AAAAAA")</Color>
+                            <PaddingLeft>3pt</PaddingLeft>
+                            <VerticalAlign>Middle</VerticalAlign>
+                            <BackgroundColor>=IIF(Fields!is_renewal_eligible.Value, "#E2EFDA", IIF(Fields!days_to_expiry.Value &lt; 0, "#FDECEA", IIF(Fields!days_to_expiry.Value &lt;= 30, "#FFF2CC", IIF(RowNumber(Nothing) Mod 2 = 0, "#F2F8FE", "White"))))</BackgroundColor>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataPad">
+                          <Value></Value>
+                          <Style>
+                            <BackgroundColor>=IIF(Fields!days_to_expiry.Value &lt; 0, "#FDECEA", IIF(Fields!days_to_expiry.Value &lt;= 30, "#FFF2CC", IIF(RowNumber(Nothing) Mod 2 = 0, "#F2F8FE", "White")))</BackgroundColor>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- Location subtotal row (group footer) -->
+                <TablixRow>
+                  <Height>0.22in</Height>
+                  <TablixCells>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataSubtotalLabel">
+                          <Value>=Fields!operator_display_name.Value &amp; " Total  —  Balance at Risk: " &amp; Format(Sum(Fields!current_balance.Value, "OperatorGroup"), "$#,##0.00")</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                          <ColSpan>7</ColSpan>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataSubtotalBalance">
+                          <Value>=Sum(Fields!current_balance.Value, "OperatorGroup")</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <Format>$#,##0.00</Format>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataSubtotalRenewal">
+                          <Value>=CountRows("OperatorGroup") &amp; " cards  ·  " &amp; Sum(IIF(Fields!is_renewal_eligible.Value, 1, 0), "OperatorGroup") &amp; " eligible"</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+                            <Color>#375623</Color><BackgroundColor>#E2EFDA</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataSubtotalPad">
+                          <Value></Value>
+                          <Style><BackgroundColor>#E2EFDA</BackgroundColor></Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- Grand total row -->
+                <TablixRow>
+                  <Height>0.26in</Height>
+                  <TablixCells>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataGrandTotalLabel">
+                          <Value>Report Grand Total  —  Balance at Risk: " &amp; Format(Sum(Fields!current_balance.Value), "$#,##0.00")</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                          <ColSpan>7</ColSpan>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataGrandTotalBalance">
+                          <Value>=Sum(Fields!current_balance.Value)</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+                            <FontWeight>Bold</FontWeight><Color>#375623</Color>
+                            <BackgroundColor>#E2EFDA</BackgroundColor>
+                            <Format>$#,##0.00</Format>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataGrandTotalRenewal">
+                          <Value>=Sum(IIF(Fields!is_renewal_eligible.Value, 1, 0)) &amp; " total eligible"</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+                            <Color>#375623</Color><BackgroundColor>#E2EFDA</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="DataGrandTotalPad">
+                          <Value></Value>
+                          <Style><BackgroundColor>#E2EFDA</BackgroundColor></Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+              </TablixRows>
+            </TablixBody>
+
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember/><TablixMember/><TablixMember/><TablixMember/>
+                <TablixMember/><TablixMember/><TablixMember/><TablixMember/>
+                <TablixMember/><TablixMember/>
+              </TablixMembers>
+            </TablixColumnHierarchy>
+
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <TablixMember/> <!-- Column header row (static) -->
+                <TablixMember>  <!-- Operator group: header + detail rows + subtotal -->
+                  <DataGroupName>OperatorGroup</DataGroupName>
+                  <Group Name="OperatorGroup">
+                    <GroupExpressions>
+                      <GroupExpression>=Fields!operator_display_name.Value</GroupExpression>
+                    </GroupExpressions>
+                    <PageBreak>
+                      <BreakLocation>Between</BreakLocation>
+                    </PageBreak>
+                  </Group>
+                  <SortExpressions>
+                    <SortExpression>
+                      <Value>=Fields!operator_display_name.Value</Value>
+                      <Direction>Ascending</Direction>
+                    </SortExpression>
+                  </SortExpressions>
+                  <TablixMembers>
+                    <!-- Group header -->
+                    <TablixMember>
+                      <KeepWithGroup>After</KeepWithGroup>
+                      <RepeatOnNewPage>true</RepeatOnNewPage>
+                    </TablixMember>
+                    <!-- Detail rows, sorted days_to_expiry ASC (most urgent first) -->
+                    <TablixMember>
+                      <DataGroupName>DetailGroup</DataGroupName>
+                      <Group Name="DetailGroup"/>
+                      <SortExpressions>
+                        <SortExpression>
+                          <Value>=Fields!days_to_expiry.Value</Value>
+                          <Direction>Ascending</Direction>
+                        </SortExpression>
+                      </SortExpressions>
+                    </TablixMember>
+                    <!-- Group subtotal footer -->
+                    <TablixMember>
+                      <KeepWithGroup>Before</KeepWithGroup>
+                    </TablixMember>
+                  </TablixMembers>
+                </TablixMember>
+                <!-- Grand total row (static) -->
+                <TablixMember/>
+              </TablixMembers>
+            </TablixRowHierarchy>
+
+            <Top>4.25in</Top>
+            <Left>0in</Left>
+            <Width>10.5in</Width>
+          </Tablix>
+
+          <!-- R? footnote -->
+          <Textbox Name="TextboxRenewalNote">
+            <Value>R? = Renewal Eligible (Y/N)  ·  Y (green cell) = issued ≥ 6 months ago AND days_to_expiry BETWEEN -999 AND 365 AND card_status_id IN (2=Active, 3=Expired)  (BR-6)  ·  Negative days = already expired.</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+              <Color>#888888</Color><FontStyle>Italic</FontStyle>
+            </Style>
+            <Top>8.0in</Top><Left>0in</Left>
+            <Width>10.5in</Width><Height>0.15in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+
+        </ReportItems>
+        <Height>8.2in</Height>
+        <Style/>
+      </Body>
+      <Width>10.5in</Width>
+      <Page>
+        <PageWidth>11in</PageWidth>
+        <PageHeight>8.5in</PageHeight>
+        <LeftMargin>0.25in</LeftMargin>
+        <RightMargin>0.25in</RightMargin>
+        <TopMargin>0.25in</TopMargin>
+        <BottomMargin>0.25in</BottomMargin>
+        <Style/>
+      </Page>
+
+      <!-- ════════════════════════════════════════════════════════════════
+           PAGE HEADER (repeats on every page)
+      ════════════════════════════════════════════════════════════════════ -->
+      <PageHeader>
+        <Height>0.5in</Height>
+        <PrintOnFirstPage>true</PrintOnFirstPage>
+        <PrintOnLastPage>true</PrintOnLastPage>
+        <ReportItems>
+          <Textbox Name="PageHdrTitle">
+            <Value>Expiring Cards Report  —  RPT-003</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#1A1A1A</Color>
+              <VerticalAlign>Middle</VerticalAlign>
+            </Style>
+            <Top>0.05in</Top><Left>0in</Left>
+            <Width>5in</Width><Height>0.2in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+          <Textbox Name="PageHdrOrg">
+            <Value>=Fields!org_name.Value &amp; "  ·  As of: " &amp; Format(Parameters!as_of_date.Value, "MM/dd/yyyy") &amp; "  ·  Window: " &amp; Parameters!expiry_window_days.Value &amp; " days"</Value>
+            <DataSetName>dsKPI</DataSetName>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#555555</Color><VerticalAlign>Middle</VerticalAlign>
+            </Style>
+            <Top>0.28in</Top><Left>0in</Left>
+            <Width>6in</Width><Height>0.16in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+          <Textbox Name="PageHdrRuntime">
+            <Value>="Generated: " &amp; Format(Globals!ExecutionTime, "MM/dd/yyyy HH:mm") &amp; " UTC"</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#888888</Color><TextAlign>Right</TextAlign>
+            </Style>
+            <Top>0.05in</Top><Left>6.5in</Left>
+            <Width>4in</Width><Height>0.16in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+        </ReportItems>
+        <Style/>
+      </PageHeader>
+
+      <!-- ════════════════════════════════════════════════════════════════
+           PAGE FOOTER (repeats on every page)
+           Page X of Y  |  CONFIDENTIAL  |  Physical cards only note
+      ════════════════════════════════════════════════════════════════════ -->
+      <PageFooter>
+        <Height>0.35in</Height>
+        <PrintOnFirstPage>true</PrintOnFirstPage>
+        <PrintOnLastPage>true</PrintOnLastPage>
+        <ReportItems>
+
+          <!-- Left: Page X of Y -->
+          <Textbox Name="FooterPageNum">
+            <Value>="Page " &amp; Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+              <Color>#888888</Color><BackgroundColor>#F5F5F5</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign>
+              <BorderColor><Bottom>#DDDDDD</Bottom></BorderColor>
+              <BorderStyle><Bottom>Solid</Bottom></BorderStyle>
+            </Style>
+            <Top>0.05in</Top><Left>0in</Left>
+            <Width>2in</Width><Height>0.22in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+
+          <!-- Centre: CONFIDENTIAL -->
+          <Textbox Name="FooterConfidential">
+            <Value>CONFIDENTIAL</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#CC0000</Color>
+              <BackgroundColor>#F5F5F5</BackgroundColor>
+              <TextAlign>Center</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <BorderColor><Bottom>#DDDDDD</Bottom></BorderColor>
+              <BorderStyle><Bottom>Solid</Bottom></BorderStyle>
+            </Style>
+            <Top>0.05in</Top><Left>3.5in</Left>
+            <Width>3.5in</Width><Height>0.22in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+
+          <!-- Right: Scope note -->
+          <Textbox Name="FooterScopeNote">
+            <Value>Physical cards only — virtual cards/QR tokens not in scope</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#888888</Color><BackgroundColor>#F5F5F5</BackgroundColor>
+              <TextAlign>Right</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <FontStyle>Italic</FontStyle>
+              <BorderColor><Bottom>#DDDDDD</Bottom></BorderColor>
+              <BorderStyle><Bottom>Solid</Bottom></BorderStyle>
+            </Style>
+            <Top>0.05in</Top><Left>7.5in</Left>
+            <Width>3in</Width><Height>0.22in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+
+        </ReportItems>
+        <Style>
+          <BackgroundColor>#F5F5F5</BackgroundColor>
+          <BorderColor><Top>#DDDDDD</Top></BorderColor>
+          <BorderStyle><Top>Solid</Top></BorderStyle>
+        </Style>
+      </PageFooter>
+
+    </ReportSection>
+  </ReportSections>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       DATA SOURCES
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <DataSources>
+    <DataSource Name="GTW_GiftCards_DS">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=&lt;sql-server-hostname&gt;;Initial Catalog=GiftCards;Integrated Security=True;ApplicationIntent=ReadOnly</ConnectString>
+        <IntegratedSecurity>true</IntegratedSecurity>
+        <Prompt></Prompt>
+      </ConnectionProperties>
+      <rd:SecurityType>Integrated</rd:SecurityType>
+      <rd:DataSourceID>GTW_GiftCards_DS</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       DATA SETS
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <DataSets>
+
+    <!-- dsKPI — returns single KPI summary row -->
+    <DataSet Name="dsKPI">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_expiring_cards_kpi</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id">
+            <Value>=Parameters!organization_id.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@as_of_date">
+            <Value>=Parameters!as_of_date.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@operator_ids">
+            <Value>=IIF(Parameters!operator_ids.Count = 0, Nothing, Join(Parameters!operator_ids.Value, ","))</Value>
+          </QueryParameter>
+          <QueryParameter Name="@expiry_window_days">
+            <Value>=Parameters!expiry_window_days.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@min_balance">
+            <Value>=Parameters!min_balance.Value</Value>
+          </QueryParameter>
+          <QueryParameter Name="@card_status_ids">
+            <Value>=IIF(Parameters!card_status_ids.Count = 0, Nothing, Join(Parameters!card_status_ids.Value, ","))</Value>
+          </QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="cards_expiring_in_window"><DataField>cards_expiring_in_window</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="cards_in_window_with_balance"><DataField>cards_in_window_with_balance</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="total_balance_at_risk_in_window"><DataField>total_balance_at_risk_in_window</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="avg_balance_at_expiry_risk"><DataField>avg_balance_at_expiry_risk</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="already_expired_with_balance_count"><DataField>already_expired_with_balance_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="already_expired_with_balance_total"><DataField>already_expired_with_balance_total</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="renewal_eligible_count"><DataField>renewal_eligible_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="org_timezone_offset"><DataField>org_timezone_offset</DataField><rd:TypeName>System.Int16</rd:TypeName></Field>
+        <Field Name="org_name"><DataField>org_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsLocationSummary — one row per (operator × window_col_sort) combination -->
+    <DataSet Name="dsLocationSummary">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_expiring_cards_location_summary</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+          <QueryParameter Name="@as_of_date"><Value>=Parameters!as_of_date.Value</Value></QueryParameter>
+          <QueryParameter Name="@operator_ids"><Value>=IIF(Parameters!operator_ids.Count = 0, Nothing, Join(Parameters!operator_ids.Value, ","))</Value></QueryParameter>
+          <QueryParameter Name="@expiry_window_days"><Value>=Parameters!expiry_window_days.Value</Value></QueryParameter>
+          <QueryParameter Name="@min_balance"><Value>=Parameters!min_balance.Value</Value></QueryParameter>
+          <QueryParameter Name="@card_status_ids"><Value>=IIF(Parameters!card_status_ids.Count = 0, Nothing, Join(Parameters!card_status_ids.Value, ","))</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="operator_id"><DataField>operator_id</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="operator_display_name"><DataField>operator_display_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="window_col_sort"><DataField>window_col_sort</DataField><rd:TypeName>System.Byte</rd:TypeName></Field>
+        <Field Name="window_col_label"><DataField>window_col_label</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="card_count"><DataField>card_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="total_balance"><DataField>total_balance</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsDetail — one row per gc.physical_card for Part B -->
+    <DataSet Name="dsDetail">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_expiring_cards_detail</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+          <QueryParameter Name="@as_of_date"><Value>=Parameters!as_of_date.Value</Value></QueryParameter>
+          <QueryParameter Name="@operator_ids"><Value>=IIF(Parameters!operator_ids.Count = 0, Nothing, Join(Parameters!operator_ids.Value, ","))</Value></QueryParameter>
+          <QueryParameter Name="@expiry_window_days"><Value>=Parameters!expiry_window_days.Value</Value></QueryParameter>
+          <QueryParameter Name="@min_balance"><Value>=Parameters!min_balance.Value</Value></QueryParameter>
+          <QueryParameter Name="@card_status_ids"><Value>=IIF(Parameters!card_status_ids.Count = 0, Nothing, Join(Parameters!card_status_ids.Value, ","))</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="physical_card_id"><DataField>physical_card_id</DataField><rd:TypeName>System.Int64</rd:TypeName></Field>
+        <Field Name="card_number_redacted"><DataField>card_number_redacted</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="gift_card_account_id"><DataField>gift_card_account_id</DataField><rd:TypeName>System.Int64</rd:TypeName></Field>
+        <Field Name="operator_id"><DataField>operator_id</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="operator_display_name"><DataField>operator_display_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="customer_display"><DataField>customer_display</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="issued_date"><DataField>issued_date</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="issued_date_local"><DataField>issued_date_local</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="expiry_date"><DataField>expiry_date</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="expiry_date_local"><DataField>expiry_date_local</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="days_to_expiry"><DataField>days_to_expiry</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="card_status_id"><DataField>card_status_id</DataField><rd:TypeName>System.Int16</rd:TypeName></Field>
+        <Field Name="card_status_name"><DataField>card_status_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="current_balance"><DataField>current_balance</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="last_transaction_date_time"><DataField>last_transaction_date_time</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="last_transaction_date_time_local"><DataField>last_transaction_date_time_local</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="is_renewal_eligible"><DataField>is_renewal_eligible</DataField><rd:TypeName>System.Boolean</rd:TypeName></Field>
+        <Field Name="window_col_label"><DataField>window_col_label</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsOperators — populates P3 operator_ids multi-select parameter -->
+    <DataSet Name="dsOperators">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_operators_lst</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id">
+            <Value>=Parameters!organization_id.Value</Value>
+          </QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="operator_id"><DataField>operator_id</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="display_name"><DataField>display_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsCardStatuses — inline query for P6 card_status_ids multi-select -->
+    <DataSet Name="dsCardStatuses">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>Text</CommandType>
+        <CommandText>SELECT card_status_id, status_name FROM GiftCards.mst.card_status WHERE card_status_id IN (2, 3, 4) ORDER BY card_status_id</CommandText>
+      </Query>
+      <Fields>
+        <Field Name="card_status_id"><DataField>card_status_id</DataField><rd:TypeName>System.Int16</rd:TypeName></Field>
+        <Field Name="status_name"><DataField>status_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsExpiryWindows — static inline dataset for P4 expiry_window_days dropdown -->
+    <DataSet Name="dsExpiryWindows">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>Text</CommandType>
+        <!-- Static value set — no actual DB call needed; uses literal VALUES -->
+        <CommandText>SELECT window_value, window_label FROM (VALUES
+  (-1, N'All (Expired + up to 365 Days)'),
+  (0,  N'Already Expired'),
+  (30, N'30 Days'),
+  (60, N'60 Days'),
+  (90, N'90 Days'),
+  (180, N'180 Days'),
+  (365, N'365 Days')
+) AS w(window_value, window_label)
+ORDER BY window_value</CommandText>
+      </Query>
+      <Fields>
+        <Field Name="window_value"><DataField>window_value</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="window_label"><DataField>window_label</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+  </DataSets>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       PARAMETERS  (P1–P6, in dependency order)
+       P1 → P3 cascading; P2, P4, P5, P6 independent
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <ReportParameters>
+
+    <!-- P1: organization_id — hidden in S2S mode; passed via URL by calling portal -->
+    <ReportParameter Name="organization_id">
+      <DataType>Integer</DataType>
+      <Nullable>false</Nullable>
+      <AllowBlank>false</AllowBlank>
+      <MultiValue>false</MultiValue>
+      <Hidden>false</Hidden>
+      <Prompt>Organization ID</Prompt>
+      <!-- Note: set Hidden=true in S2S deployment; role gate enforced by calling portal -->
+    </ReportParameter>
+
+    <!-- P2: as_of_date — date picker, defaults to today -->
+    <ReportParameter Name="as_of_date">
+      <DataType>DateTime</DataType>
+      <Nullable>false</Nullable>
+      <AllowBlank>false</AllowBlank>
+      <MultiValue>false</MultiValue>
+      <DefaultValue>
+        <Values>
+          <Value>=Today()</Value>
+        </Values>
+      </DefaultValue>
+      <Prompt>As of Date</Prompt>
+      <!-- V1: SP enforces @as_of_date &lt;= today + 1; SSRS parameter may add MaxDate validator -->
+    </ReportParameter>
+
+    <!-- P3: operator_ids — multi-select, cascades from P1 via dsOperators -->
+    <ReportParameter Name="operator_ids">
+      <DataType>String</DataType>
+      <Nullable>true</Nullable>
+      <AllowBlank>true</AllowBlank>
+      <MultiValue>true</MultiValue>
+      <DefaultValue>
+        <!-- Default: all operators for this org -->
+        <DataSetReference>
+          <DataSetName>dsOperators</DataSetName>
+          <ValueField>operator_id</ValueField>
+        </DataSetReference>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsOperators</DataSetName>
+          <ValueField>operator_id</ValueField>
+          <LabelField>display_name</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Operator(s)</Prompt>
+    </ReportParameter>
+
+    <!-- P4: expiry_window_days — single-select dropdown, default 90 -->
+    <ReportParameter Name="expiry_window_days">
+      <DataType>Integer</DataType>
+      <Nullable>false</Nullable>
+      <AllowBlank>false</AllowBlank>
+      <MultiValue>false</MultiValue>
+      <DefaultValue>
+        <Values>
+          <Value>90</Value>
+        </Values>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsExpiryWindows</DataSetName>
+          <ValueField>window_value</ValueField>
+          <LabelField>window_label</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Expiry Window</Prompt>
+      <!-- V3: SP enforces value must be in (-1, 0, 30, 60, 90, 180, 365) -->
+    </ReportParameter>
+
+    <!-- P5: min_balance — decimal, default 0.01 (exclude zero-balance cards) -->
+    <ReportParameter Name="min_balance">
+      <DataType>Float</DataType>
+      <Nullable>false</Nullable>
+      <AllowBlank>false</AllowBlank>
+      <MultiValue>false</MultiValue>
+      <DefaultValue>
+        <Values>
+          <Value>0.01</Value>
+        </Values>
+      </DefaultValue>
+      <Prompt>Min Balance ($)</Prompt>
+      <!-- V2: SP enforces @min_balance >= 0; set to 0 to include zero-balance cards -->
+    </ReportParameter>
+
+    <!-- P6: card_status_ids — multi-select, default Active (2) only; Replaced (5) never offered -->
+    <ReportParameter Name="card_status_ids">
+      <DataType>String</DataType>
+      <Nullable>false</Nullable>
+      <AllowBlank>false</AllowBlank>
+      <MultiValue>true</MultiValue>
+      <DefaultValue>
+        <Values>
+          <Value>2</Value>
+        </Values>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsCardStatuses</DataSetName>
+          <ValueField>card_status_id</ValueField>
+          <LabelField>status_name</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Card Status</Prompt>
+      <!-- BR-7: Replaced (status_id=5) is excluded from dsCardStatuses inline query and all SPs -->
+    </ReportParameter>
+
+  </ReportParameters>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       REPORT LANGUAGE / LOCALIZATION
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <Language>en-US</Language>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+
+</Report>

@@ -1,0 +1,1169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  RPT-015 — Kiosk Transaction Detail Report
+  SSRS Report Definition Language (RDL)
+  Spec: coding-agent/specs/web-reports/RPT-015-kiosk-transaction-detail.md
+  Namespace: http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition
+  Repository: reports/organization/RPT-015-kiosk-transaction-detail.rdl
+
+  Page: A4 Landscape (11.69in × 8.27in), 10mm (0.394in) margins, body width = 10.905in
+  Deployment target: SSRS Web Portal → /GTW/GiftCards/RPT-015-Kiosk-Transaction-Detail.rdl
+  Data source: GTW_GiftCards_DS (Windows Integrated Security, ReadOnly, GiftCards DB)
+
+  Role gate (enforced by calling portal before rendering URL):
+    DAWN.usm.role.role_id IN (8=Owner, 9=Supervisor) WHERE role_type_id = 3
+
+  Datasets:
+    dsKPI       → gc.rpt_kiosk_transaction_kpi      (§7.1 — KPI banner, single row)
+    dsDetail    → gc.rpt_kiosk_transaction_detail    (§7.2 — per-transaction rows)
+    dsOperators → gc.rpt_org_operators_lst           (shared SP from RPT-001, P4 cascade)
+    dsTerminals → gc.rpt_org_kiosk_terminals_lst     (kiosk-type terminals, P5 cascade)
+
+  Parameters (P1–P8):
+    organization_id, from_date, to_date,
+    operator_ids (multi), terminal_ids (multi),
+    card_type_ids (multi-static), dispense_status_ids (multi-static),
+    transaction_status_id (single-static, nullable)
+
+  Layout:
+    ReportHeaderBand      : Top=0in,     Height=0.75in
+    KpiSectionLabel (×2)  : Top=0.75in,  Height=0.188in
+    TablixKpiRow1         : Top=1.0in,   Height=0.708in   (3 tiles: Txns, Physical, Virtual)
+    TablixKpiRow2         : Top=1.812in, Height=0.708in   (3 tiles: Dispensed, Undispensed, Fees)
+    PartBSectionLabel (×2): Top=2.645in, Height=0.188in
+    TablixPartB           : Top=2.833in, Height=auto      (13 display cols + 1 hidden)
+
+  Column widths Part B (sum = 10.905in):
+    Date/Time  0.885 | Ref#    1.006 | Operator 1.267 | Terminal 0.785 | CardType 0.845
+    Card#      0.704 | Customer 0.825 | Requested 0.684 | Dispensed 0.704 | Undispensed 0.704
+    Fee(Net)   0.583 | DispStatus 1.086 | TxnStatus 0.827 | [hidden: terminal_serial 0.825]
+
+  Security: PII minimised — customer_display = first_name + last_initial + '.'
+            card_number_redacted is pre-masked; no Vault JOIN permitted.
+            No cashier JOIN (kiosk transactions have cashier_session_id IS NULL).
+            ExecutionLog3 auto-audit (SOC 2 CC6.1/CC7.2/CC4.1).
+            PCI DSS Req.3: no full PAN, no decryption. HIPAA minimum-necessary.
+
+  TraceCounts / GTW Gift Card System — 2026-06-06
+-->
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition"
+        xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+
+  <ReportID>RPT-015</ReportID>
+  <Description>Kiosk Transaction Detail Report — Per-transaction drill-down of all kiosk withdrawal transactions (channel=2). Dispense outcome, card type, cash amounts, and minimised customer identity. Owner and Supervisor access only. 90-day date range limit.</Description>
+  <Author>TraceCounts GTW System</Author>
+  <AutoRefresh>0</AutoRefresh>
+
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+
+          <!-- ════════════════════════════════════════════════════════════
+               1. REPORT HEADER BAND — #1A1A1A, 0.75in
+          ════════════════════════════════════════════════════════════════ -->
+          <Rectangle Name="ReportHeaderBand">
+            <Style>
+              <BackgroundColor>#1A1A1A</BackgroundColor>
+            </Style>
+            <Top>0in</Top>
+            <Left>0in</Left>
+            <Width>10.905in</Width>
+            <Height>0.75in</Height>
+            <ReportItems>
+              <Textbox Name="TextboxTitle">
+                <Value>Kiosk Transaction Detail Report</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>13pt</FontSize>
+                  <FontWeight>Bold</FontWeight>
+                  <Color>#FFFFFF</Color>
+                  <VerticalAlign>Middle</VerticalAlign>
+                </Style>
+                <Top>0.05in</Top><Left>0.1in</Left>
+                <Width>6.5in</Width><Height>0.22in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxOrgLine">
+                <Value>="Period: " &amp; Format(Parameters!from_date.Value, "MM/dd/yyyy") &amp; " – " &amp; Format(Parameters!to_date.Value, "MM/dd/yyyy") &amp; "  (" &amp; First(Fields!org_windows_timezone_id.Value, "dsKPI") &amp; ")  ·  Operators: " &amp; IIF(Parameters!operator_ids.Count = 0, "All", CStr(Parameters!operator_ids.Count) &amp; " selected") &amp; "  ·  Terminals: " &amp; IIF(Parameters!terminal_ids.Count = 0, "All", CStr(Parameters!terminal_ids.Count) &amp; " selected")</Value>
+                <DataSetName>dsKPI</DataSetName>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8.5pt</FontSize>
+                  <Color>#AAAAAA</Color>
+                  <VerticalAlign>Middle</VerticalAlign>
+                </Style>
+                <Top>0.31in</Top><Left>0.1in</Left>
+                <Width>7.0in</Width><Height>0.17in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxFiltersLine">
+                <Value>="Card Type: " &amp; IIF(Parameters!card_type_ids.Count = 0, "All", CStr(Parameters!card_type_ids.Count) &amp; " selected") &amp; "  ·  Dispense Status: " &amp; IIF(Parameters!dispense_status_ids.Count = 0, "All", CStr(Parameters!dispense_status_ids.Count) &amp; " selected") &amp; "  ·  Txn Status: " &amp; IIF(IsNothing(Parameters!transaction_status_id.Value), "All", IIF(Parameters!transaction_status_id.Value = 0, "Active Only", "Reversed Only"))</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8pt</FontSize>
+                  <Color>#888888</Color>
+                  <VerticalAlign>Middle</VerticalAlign>
+                </Style>
+                <Top>0.49in</Top><Left>0.1in</Left>
+                <Width>7.0in</Width><Height>0.15in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxGenerated">
+                <Value>="Generated: " &amp; Format(Globals!ExecutionTime, "MM/dd/yyyy HH:mm") &amp; " UTC"</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8.5pt</FontSize>
+                  <Color>#AAAAAA</Color>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+                <Top>0.05in</Top><Left>7.2in</Left>
+                <Width>3.605in</Width><Height>0.16in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxUser">
+                <Value>="By: " &amp; User!UserID</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8.5pt</FontSize>
+                  <Color>#AAAAAA</Color>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+                <Top>0.22in</Top><Left>7.2in</Left>
+                <Width>3.605in</Width><Height>0.16in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+              <Textbox Name="TextboxReportID">
+                <Value>Report ID: RPT-015  ·  SSRS Web Portal</Value>
+                <Style>
+                  <FontFamily>Calibri</FontFamily>
+                  <FontSize>8pt</FontSize>
+                  <Color>#888888</Color>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+                <Top>0.39in</Top><Left>7.2in</Left>
+                <Width>3.605in</Width><Height>0.14in</Height>
+                <CanGrow>false</CanGrow>
+              </Textbox>
+            </ReportItems>
+          </Rectangle>
+
+          <!-- ════════════════════════════════════════════════════════════
+               2. KPI SECTION LABEL — #D6E4F0, Top=0.75in
+          ════════════════════════════════════════════════════════════════ -->
+          <Textbox Name="TextboxKpiSectionLabel">
+            <Value>KPI SUMMARY</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#1A1A1A</Color>
+              <BackgroundColor>#D6E4F0</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign><PaddingLeft>10pt</PaddingLeft>
+            </Style>
+            <Top>0.75in</Top><Left>0in</Left>
+            <Width>7.5in</Width><Height>0.188in</Height>
+          </Textbox>
+          <Textbox Name="TextboxKpiDatasetLabel">
+            <Value>dsKPI  ·  gc.rpt_kiosk_transaction_kpi</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#555555</Color><BackgroundColor>#D6E4F0</BackgroundColor>
+              <TextAlign>Right</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <PaddingRight>8pt</PaddingRight>
+            </Style>
+            <Top>0.75in</Top><Left>7.5in</Left>
+            <Width>3.405in</Width><Height>0.188in</Height>
+          </Textbox>
+
+          <!-- ════════════════════════════════════════════════════════════
+               3. KPI ROW 1 — 3 tiles: Total Txns | Physical Card | Virtual QR
+                  Top=1.0in, Height=0.708in, 3 × 3.635in = 10.905in
+          ════════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablixKpiRow1">
+            <DataSetName>dsKPI</DataSetName>
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>3.635in</Width></TablixColumn>
+                <TablixColumn><Width>3.635in</Width></TablixColumn>
+                <TablixColumn><Width>3.635in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow>
+                  <Height>0.708in</Height>
+                  <TablixCells>
+
+                    <!-- R1-T1: TOTAL KIOSK TRANSACTIONS — accent #1A1A1A -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile1">
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile1Accent">
+                              <Style><BackgroundColor>#1A1A1A</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>0.708in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile1Label">
+                              <Value>TOTAL KIOSK TRANSACTIONS</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.04in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.13in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile1Value">
+                              <Value>=IIF(IsNothing(Fields!total_kiosk_transactions.Value), 0, Fields!total_kiosk_transactions.Value)</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>14pt</FontSize><FontWeight>Bold</FontWeight><Color>#1A1A1A</Color><Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.20in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.25in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile1Sub">
+                              <Value>All qualifying kiosk withdrawal transactions in period</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#888888</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.47in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.20in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                    <!-- R1-T2: PHYSICAL CARD WITHDRAWALS — accent #1F3864 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile2">
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile2Accent">
+                              <Style><BackgroundColor>#1F3864</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>0.708in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile2Label">
+                              <Value>PHYSICAL CARD WITHDRAWALS</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.04in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.13in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile2Value">
+                              <Value>=IIF(IsNothing(Fields!physical_card_count.Value), 0, Fields!physical_card_count.Value)</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>14pt</FontSize><FontWeight>Bold</FontWeight><Color>#1F3864</Color><Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.20in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.25in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile2Sub">
+                              <Value>transaction_type_id = 2 (Debit) — physical card + PIN at kiosk</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#888888</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.47in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.20in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                    <!-- R1-T3: VIRTUAL CARD (QR CODE) WITHDRAWALS — accent #375623 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile3">
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile3Accent">
+                              <Style><BackgroundColor>#375623</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>0.708in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile3Label">
+                              <Value>VIRTUAL CARD (QR CODE) WITHDRAWALS</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.04in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.13in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile3Value">
+                              <Value>=IIF(IsNothing(Fields!virtual_qr_count.Value), 0, Fields!virtual_qr_count.Value)</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>14pt</FontSize><FontWeight>Bold</FontWeight><Color>#375623</Color><Format>#,##0</Format><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.20in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.25in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile3Sub">
+                              <Value>transaction_type_id = 7 (QR_REDEEM) — virtual card holder redeems at kiosk</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#888888</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.47in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.20in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                  </TablixCells>
+                </TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember/><TablixMember/><TablixMember/>
+              </TablixMembers>
+            </TablixColumnHierarchy>
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <TablixMember>
+                  <DataGroupName>KpiRow1Group</DataGroupName>
+                  <Group Name="KpiRow1Group"/>
+                </TablixMember>
+              </TablixMembers>
+            </TablixRowHierarchy>
+            <Top>1.0in</Top><Left>0in</Left>
+            <Width>10.905in</Width><Height>0.708in</Height>
+          </Tablix>
+
+          <!-- ════════════════════════════════════════════════════════════
+               4. KPI ROW 2 — 3 tiles: Cash Dispensed | Undispensed | Fees (Net)
+                  Top=1.812in, Height=0.708in
+          ════════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablixKpiRow2">
+            <DataSetName>dsKPI</DataSetName>
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>3.635in</Width></TablixColumn>
+                <TablixColumn><Width>3.635in</Width></TablixColumn>
+                <TablixColumn><Width>3.635in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow>
+                  <Height>0.708in</Height>
+                  <TablixCells>
+
+                    <!-- R2-T4: TOTAL CASH DISPENSED — accent #375623 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile4">
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile4Accent">
+                              <Style><BackgroundColor>#375623</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>0.708in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile4Label">
+                              <Value>TOTAL CASH DISPENSED</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.04in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.13in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile4Value">
+                              <Value>=IIF(IsNothing(Fields!total_cash_dispensed.Value), 0, Fields!total_cash_dispensed.Value)</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>14pt</FontSize><FontWeight>Bold</FontWeight><Color>#375623</Color><Format>$#,##0.00</Format><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.20in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.25in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile4Sub">
+                              <Value>SUM(dispensed_amount) where cash_dispense_status IN (3,8) — Success and Partial</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#888888</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.47in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.20in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                    <!-- R2-T5: TOTAL UNDISPENSED — accent #C45911 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile5">
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile5Accent">
+                              <Style><BackgroundColor>#C45911</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>0.708in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile5Label">
+                              <Value>TOTAL UNDISPENSED</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.04in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.13in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile5Value">
+                              <Value>=IIF(IsNothing(Fields!total_undispensed.Value), 0, Fields!total_undispensed.Value)</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>14pt</FontSize><FontWeight>Bold</FontWeight><Color>#C45911</Color><Format>$#,##0.00</Format><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.20in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.25in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile5Sub">
+                              <Value>Partial credit-backs (status 8) + full credit-backs on Failed (4) and No-ACK (5)</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#888888</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.47in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.20in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                    <!-- R2-T6: TOTAL FEES (NET) — accent #833C00 -->
+                    <TablixCell>
+                      <CellContents>
+                        <Rectangle Name="KpiTile6">
+                          <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                            <BorderColor>#C8DBF0</BorderColor>
+                            <BorderStyle>Solid</BorderStyle>
+                            <BorderWidth>1.5pt</BorderWidth>
+                          </Style>
+                          <ReportItems>
+                            <Rectangle Name="KpiTile6Accent">
+                              <Style><BackgroundColor>#833C00</BackgroundColor></Style>
+                              <Top>0in</Top><Left>0in</Left>
+                              <Width>0.07in</Width><Height>0.708in</Height>
+                            </Rectangle>
+                            <Textbox Name="KpiTile6Label">
+                              <Value>TOTAL FEES (NET)</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.04in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.13in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile6Value">
+                              <Value>=IIF(IsNothing(Fields!total_fees_net.Value), 0, Fields!total_fees_net.Value)</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>14pt</FontSize><FontWeight>Bold</FontWeight><Color>#833C00</Color><Format>$#,##0.00</Format><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.20in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.25in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                            <Textbox Name="KpiTile6Sub">
+                              <Value>Net fees — excludes credit-backs on Dispense-Failed (4) and No-ACK (5)</Value>
+                              <Style><FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize><Color>#888888</Color><PaddingLeft>4pt</PaddingLeft></Style>
+                              <Top>0.47in</Top><Left>0.1in</Left>
+                              <Width>3.535in</Width><Height>0.20in</Height>
+                              <CanGrow>false</CanGrow>
+                            </Textbox>
+                          </ReportItems>
+                        </Rectangle>
+                      </CellContents>
+                    </TablixCell>
+
+                  </TablixCells>
+                </TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember/><TablixMember/><TablixMember/>
+              </TablixMembers>
+            </TablixColumnHierarchy>
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <TablixMember>
+                  <DataGroupName>KpiRow2Group</DataGroupName>
+                  <Group Name="KpiRow2Group"/>
+                </TablixMember>
+              </TablixMembers>
+            </TablixRowHierarchy>
+            <Top>1.812in</Top><Left>0in</Left>
+            <Width>10.905in</Width><Height>0.708in</Height>
+          </Tablix>
+
+          <!-- ════════════════════════════════════════════════════════════
+               5. PART B SECTION LABEL — Top=2.645in
+          ════════════════════════════════════════════════════════════════ -->
+          <Textbox Name="TextboxPartBSectionLabel">
+            <Value>PART B — TRANSACTION DETAIL</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#1A1A1A</Color>
+              <BackgroundColor>#D6E4F0</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign><PaddingLeft>10pt</PaddingLeft>
+            </Style>
+            <Top>2.645in</Top><Left>0in</Left>
+            <Width>7.5in</Width><Height>0.188in</Height>
+          </Textbox>
+          <Textbox Name="TextboxPartBDatasetLabel">
+            <Value>dsDetail  ·  gc.rpt_kiosk_transaction_detail</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#555555</Color><BackgroundColor>#D6E4F0</BackgroundColor>
+              <TextAlign>Right</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <PaddingRight>8pt</PaddingRight>
+            </Style>
+            <Top>2.645in</Top><Left>7.5in</Left>
+            <Width>3.405in</Width><Height>0.188in</Height>
+          </Textbox>
+
+          <!-- ════════════════════════════════════════════════════════════
+               6. PART B DETAIL TABLIX — Top=2.833in
+               13 display columns + 1 hidden (terminal_serial)
+               Column widths: 0.885+1.006+1.267+0.785+0.845+0.704+0.825
+                              +0.684+0.704+0.704+0.583+1.086+0.827 = 10.905in
+               Row types: ColHdr | OperatorGroup → [GrpHdr, TransactionDetail, GrpSubtotal] | GrandTotal
+               Alternating rows: RowNumber("TransactionDetail") Mod 2
+          ════════════════════════════════════════════════════════════════ -->
+          <Tablix Name="TablixPartB">
+            <DataSetName>dsDetail</DataSetName>
+            <NoRowsMessage>No kiosk transactions found for the selected filters and date range.</NoRowsMessage>
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>0.885in</Width></TablixColumn>  <!-- c0  Date/Time -->
+                <TablixColumn><Width>1.006in</Width></TablixColumn>  <!-- c1  Ref # -->
+                <TablixColumn><Width>1.267in</Width></TablixColumn>  <!-- c2  Operator -->
+                <TablixColumn><Width>0.785in</Width></TablixColumn>  <!-- c3  Terminal -->
+                <TablixColumn><Width>0.845in</Width></TablixColumn>  <!-- c4  Card Type -->
+                <TablixColumn><Width>0.704in</Width></TablixColumn>  <!-- c5  Card # -->
+                <TablixColumn><Width>0.825in</Width></TablixColumn>  <!-- c6  Customer -->
+                <TablixColumn><Width>0.684in</Width></TablixColumn>  <!-- c7  Requested -->
+                <TablixColumn><Width>0.704in</Width></TablixColumn>  <!-- c8  Dispensed -->
+                <TablixColumn><Width>0.704in</Width></TablixColumn>  <!-- c9  Undispensed -->
+                <TablixColumn><Width>0.583in</Width></TablixColumn>  <!-- c10 Fee (Net) -->
+                <TablixColumn><Width>1.086in</Width></TablixColumn>  <!-- c11 Dispense Status -->
+                <TablixColumn><Width>0.827in</Width></TablixColumn>  <!-- c12 Txn Status -->
+                <TablixColumn><Width>0.825in</Width></TablixColumn>  <!-- c13 terminal_serial [hidden] -->
+              </TablixColumns>
+              <TablixRows>
+
+                <!-- ROW 1: Column headers — bg #2C3E50, white bold 8pt -->
+                <TablixRow>
+                  <Height>0.23in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="PB_Date_Hdr"><Value>Date/Time</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Ref_Hdr"><Value>Ref #</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Op_Hdr"><Value>Operator</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Trm_Hdr"><Value>Terminal</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Crd_Hdr"><Value>Card Type</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Num_Hdr"><Value>Card #</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Cus_Hdr"><Value>Customer</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Req_Hdr"><Value>Requested</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Dis_Hdr"><Value>Dispensed</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Und_Hdr"><Value>Undispensed</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Fee_Hdr"><Value>Fee (Net)</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Dst_Hdr"><Value>Dispense Status</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Txs_Hdr"><Value>Txn Status</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Ser_Hdr"><Value>Serial #</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- ROW 2: Operator group header — bg #D6E4F0, bold 9pt -->
+                <TablixRow>
+                  <Height>0.19in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="PB_Date_GH"><Value>=First(Fields!operator_display_name.Value, "OperatorGroup")</Value><Style><FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight><Color>#1A1A1A</Color><BackgroundColor>#D6E4F0</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style><ColSpan>13</ColSpan></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Ser_GH"><Value>=""</Value><Style><BackgroundColor>#D6E4F0</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- ROW 3: Transaction detail — alternating #FFFFFF / #F5F7FA, 8pt -->
+                <TablixRow>
+                  <Height>0.24in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="PB_Date_Det"><Value>=IIF(IsNothing(Fields!transaction_date_local.Value), "", Format(Fields!transaction_date_local.Value, "MM/dd/yyyy HH:mm"))</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#1A1A1A</Color><BackgroundColor>=IIF(RowNumber("TransactionDetail") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Ref_Det"><Value>=IIF(IsNothing(Fields!transaction_reference_number.Value), "", Fields!transaction_reference_number.Value)</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#1A1A1A</Color><BackgroundColor>=IIF(RowNumber("TransactionDetail") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Op_Det"><Value>=IIF(IsNothing(Fields!operator_display_name.Value), "", Fields!operator_display_name.Value)</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#1A1A1A</Color><BackgroundColor>=IIF(RowNumber("TransactionDetail") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Trm_Det"><Value>=IIF(IsNothing(Fields!terminal_name.Value), "N/A", Fields!terminal_name.Value)</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#1A1A1A</Color><BackgroundColor>=IIF(RowNumber("TransactionDetail") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Crd_Det"><Value>=IIF(IsNothing(Fields!card_type_display.Value), "", Fields!card_type_display.Value)</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#1A1A1A</Color><BackgroundColor>=IIF(RowNumber("TransactionDetail") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Num_Det"><Value>=IIF(IsNothing(Fields!card_number_redacted.Value), "", Fields!card_number_redacted.Value)</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#555555</Color><BackgroundColor>=IIF(RowNumber("TransactionDetail") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Cus_Det"><Value>=IIF(IsNothing(Fields!customer_display.Value), "Unknown", Fields!customer_display.Value)</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#1A1A1A</Color><BackgroundColor>=IIF(RowNumber("TransactionDetail") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Req_Det"><Value>=IIF(IsNothing(Fields!amount_requested.Value), 0, Fields!amount_requested.Value)</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#1A1A1A</Color><Format>$#,##0.00</Format><BackgroundColor>=IIF(RowNumber("TransactionDetail") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Dis_Det"><Value>=IIF(IsNothing(Fields!amount_dispensed.Value), 0, Fields!amount_dispensed.Value)</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#1A1A1A</Color><Format>$#,##0.00</Format><BackgroundColor>=IIF(RowNumber("TransactionDetail") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Und_Det"><Value>=IIF(IsNothing(Fields!amount_undispensed.Value), 0, Fields!amount_undispensed.Value)</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#1A1A1A</Color><Format>$#,##0.00</Format><BackgroundColor>=IIF(RowNumber("TransactionDetail") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Fee_Det"><Value>=IIF(IsNothing(Fields!fee_net.Value), 0, Fields!fee_net.Value)</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#1A1A1A</Color><Format>$#,##0.00</Format><BackgroundColor>=IIF(RowNumber("TransactionDetail") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <!-- c11: Dispense Status — conditional badge fill -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="PB_Dst_Det">
+                          <Value>=IIF(IsNothing(Fields!dispense_status_name.Value), "", Fields!dispense_status_name.Value)</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight>
+                            <Color>=Switch(Fields!dispense_status_name.Value = "Dispense-Success", "#375623", Fields!dispense_status_name.Value = "Dispense_Partial", "#7B5800", Fields!dispense_status_name.Value = "Dispense-Failed", "#B71C1C", Fields!dispense_status_name.Value = "No Acknowledgement", "#E65100", True, "#1A1A1A")</Color>
+                            <BackgroundColor>=Switch(Fields!dispense_status_name.Value = "Dispense-Success", "#E8F5E9", Fields!dispense_status_name.Value = "Dispense_Partial", "#FFF9C4", Fields!dispense_status_name.Value = "Dispense-Failed", "#FDECEA", Fields!dispense_status_name.Value = "No Acknowledgement", "#FFF3E0", True, "#FFFFFF")</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><TextAlign>Center</TextAlign>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- c12: Transaction Status — conditional badge fill -->
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="PB_Txs_Det">
+                          <Value>=IIF(IsNothing(Fields!transaction_status_name.Value), "Unknown", Fields!transaction_status_name.Value)</Value>
+                          <Style>
+                            <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight>
+                            <Color>=IIF(Fields!transaction_status_name.Value = "Reversed", "#B71C1C", "#375623")</Color>
+                            <BackgroundColor>=IIF(Fields!transaction_status_name.Value = "Reversed", "#FDECEA", "#E8F5E9")</BackgroundColor>
+                            <VerticalAlign>Middle</VerticalAlign><TextAlign>Center</TextAlign>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <!-- c13: terminal_serial — hidden, export-only -->
+                    <TablixCell><CellContents><Textbox Name="PB_Ser_Det"><Value>=IIF(IsNothing(Fields!terminal_serial.Value), "N/A", Fields!terminal_serial.Value)</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><Color>#1A1A1A</Color><BackgroundColor>=IIF(RowNumber("TransactionDetail") Mod 2 = 0, "#F5F7FA", "#FFFFFF")</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- ROW 4: Group subtotal — bg #E2EFDA, bold -->
+                <TablixRow>
+                  <Height>0.24in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="PB_Date_GS"><Value>="Subtotal — " &amp; Count(Fields!transaction_id.Value, "OperatorGroup") &amp; " transactions"</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#1A1A1A</Color><BackgroundColor>#E2EFDA</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Ref_GS"><Value>=""</Value><Style><BackgroundColor>#E2EFDA</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Op_GS"><Value>=""</Value><Style><BackgroundColor>#E2EFDA</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Trm_GS"><Value>=""</Value><Style><BackgroundColor>#E2EFDA</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Crd_GS"><Value>=""</Value><Style><BackgroundColor>#E2EFDA</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Num_GS"><Value>=""</Value><Style><BackgroundColor>#E2EFDA</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Cus_GS"><Value>=""</Value><Style><BackgroundColor>#E2EFDA</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Req_GS"><Value>=Sum(Fields!amount_requested.Value, "OperatorGroup")</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#1A1A1A</Color><Format>$#,##0.00</Format><BackgroundColor>#E2EFDA</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Dis_GS"><Value>=Sum(Fields!amount_dispensed.Value, "OperatorGroup")</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#375623</Color><Format>$#,##0.00</Format><BackgroundColor>#E2EFDA</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Und_GS"><Value>=Sum(Fields!amount_undispensed.Value, "OperatorGroup")</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#C45911</Color><Format>$#,##0.00</Format><BackgroundColor>#E2EFDA</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Fee_GS"><Value>=Sum(Fields!fee_net.Value, "OperatorGroup")</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#1A1A1A</Color><Format>$#,##0.00</Format><BackgroundColor>#E2EFDA</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Dst_GS"><Value>=""</Value><Style><BackgroundColor>#E2EFDA</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Txs_GS"><Value>=""</Value><Style><BackgroundColor>#E2EFDA</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Ser_GS"><Value>=""</Value><Style><BackgroundColor>#E2EFDA</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+                <!-- ROW 5: Grand total — bg #2C3E50, white bold -->
+                <TablixRow>
+                  <Height>0.24in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="PB_Date_GT"><Value>="GRAND TOTAL — " &amp; Count(Fields!transaction_id.Value, "dsDetail") &amp; " transactions"</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><PaddingLeft>4pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Ref_GT"><Value>=""</Value><Style><BackgroundColor>#2C3E50</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Op_GT"><Value>=""</Value><Style><BackgroundColor>#2C3E50</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Trm_GT"><Value>=""</Value><Style><BackgroundColor>#2C3E50</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Crd_GT"><Value>=""</Value><Style><BackgroundColor>#2C3E50</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Num_GT"><Value>=""</Value><Style><BackgroundColor>#2C3E50</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Cus_GT"><Value>=""</Value><Style><BackgroundColor>#2C3E50</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Req_GT"><Value>=Sum(Fields!amount_requested.Value, "dsDetail")</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><Format>$#,##0.00</Format><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Dis_GT"><Value>=Sum(Fields!amount_dispensed.Value, "dsDetail")</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><Format>$#,##0.00</Format><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Und_GT"><Value>=Sum(Fields!amount_undispensed.Value, "dsDetail")</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><Format>$#,##0.00</Format><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Fee_GT"><Value>=Sum(Fields!fee_net.Value, "dsDetail")</Value><Style><FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#FFFFFF</Color><Format>$#,##0.00</Format><BackgroundColor>#2C3E50</BackgroundColor><VerticalAlign>Middle</VerticalAlign><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Dst_GT"><Value>=""</Value><Style><BackgroundColor>#2C3E50</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Txs_GT"><Value>=""</Value><Style><BackgroundColor>#2C3E50</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="PB_Ser_GT"><Value>=""</Value><Style><BackgroundColor>#2C3E50</BackgroundColor></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+
+              </TablixRows>
+            </TablixBody>
+
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <!-- 13 visible columns -->
+                <TablixMember/><TablixMember/><TablixMember/><TablixMember/>
+                <TablixMember/><TablixMember/><TablixMember/><TablixMember/>
+                <TablixMember/><TablixMember/><TablixMember/><TablixMember/>
+                <TablixMember/>
+                <!-- 1 hidden column: terminal_serial (export-only) -->
+                <TablixMember>
+                  <Visibility>
+                    <Hidden>true</Hidden>
+                  </Visibility>
+                </TablixMember>
+              </TablixMembers>
+            </TablixColumnHierarchy>
+
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <!-- Row 1: Column header — repeat on every page -->
+                <TablixMember>
+                  <KeepWithGroup>After</KeepWithGroup>
+                  <RepeatOnNewPage>true</RepeatOnNewPage>
+                  <FixedData>true</FixedData>
+                </TablixMember>
+                <!-- Outer group: OperatorGroup — grouped by operator_display_name -->
+                <TablixMember>
+                  <Group Name="OperatorGroup">
+                    <GroupExpressions>
+                      <GroupExpression>=Fields!operator_display_name.Value</GroupExpression>
+                    </GroupExpressions>
+                  </Group>
+                  <SortExpressions>
+                    <SortExpression>
+                      <Value>=Fields!operator_display_name.Value</Value>
+                      <Direction>Ascending</Direction>
+                    </SortExpression>
+                  </SortExpressions>
+                  <TablixMembers>
+                    <!-- Row 2: Group header (operator name banner) -->
+                    <TablixMember>
+                      <KeepWithGroup>After</KeepWithGroup>
+                    </TablixMember>
+                    <!-- Row 3: Transaction detail rows -->
+                    <TablixMember>
+                      <Group Name="TransactionDetail">
+                        <DataGroupName>TransactionDetail</DataGroupName>
+                      </Group>
+                    </TablixMember>
+                    <!-- Row 4: Group subtotal -->
+                    <TablixMember>
+                      <KeepWithGroup>Before</KeepWithGroup>
+                    </TablixMember>
+                  </TablixMembers>
+                </TablixMember>
+                <!-- Row 5: Grand total -->
+                <TablixMember/>
+              </TablixMembers>
+            </TablixRowHierarchy>
+
+            <Top>2.833in</Top><Left>0in</Left>
+            <Width>10.905in</Width><Height>1.14in</Height>
+          </Tablix>
+
+          <!-- ════════════════════════════════════════════════════════════
+               7. FOOTNOTE
+          ════════════════════════════════════════════════════════════════ -->
+          <Textbox Name="TextboxFootnote">
+            <Value>No customer PII — customer_display = first_name + last_initial + '.' only. card_number_redacted is pre-masked (no Vault JOIN). Dispense status: 3=Success, 4=Failed, 5=No-ACK, 8=Partial. Net fees exclude credit-backs on statuses 4 and 5. transaction_channel=2 (kiosk only). transaction_type_id=2 (Physical), 7 (Virtual QR_REDEEM). Max 90-day date range. PCI DSS Req.3 compliant. SOC 2 CC6.1/CC4.1.</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+              <Color>#888888</Color><FontStyle>Italic</FontStyle>
+            </Style>
+            <Top>4.02in</Top><Left>0in</Left>
+            <Width>10.905in</Width><Height>0.2in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+
+        </ReportItems>
+        <Height>8.0in</Height>
+        <Style/>
+      </Body>
+      <Width>10.905in</Width>
+
+      <!-- ════════════════════════════════════════════════════════════════
+           PAGE SETTINGS — A4 Landscape, 10mm margins
+      ════════════════════════════════════════════════════════════════════ -->
+      <Page>
+        <PageWidth>11.69in</PageWidth>
+        <PageHeight>8.27in</PageHeight>
+        <LeftMargin>0.394in</LeftMargin>
+        <RightMargin>0.394in</RightMargin>
+        <TopMargin>0.394in</TopMargin>
+        <BottomMargin>0.394in</BottomMargin>
+        <Style/>
+      </Page>
+
+      <!-- ════════════════════════════════════════════════════════════════
+           PAGE HEADER (page 2 onwards)
+      ════════════════════════════════════════════════════════════════════ -->
+      <PageHeader>
+        <Height>0.35in</Height>
+        <PrintOnFirstPage>false</PrintOnFirstPage>
+        <PrintOnLastPage>true</PrintOnLastPage>
+        <ReportItems>
+          <Textbox Name="PageHdrTitle">
+            <Value>Kiosk Transaction Detail Report  —  RPT-015</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>9pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#1A1A1A</Color>
+              <VerticalAlign>Middle</VerticalAlign>
+            </Style>
+            <Top>0.04in</Top><Left>0in</Left>
+            <Width>5in</Width><Height>0.2in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+          <Textbox Name="PageHdrPeriod">
+            <Value>=Format(Parameters!from_date.Value, "MM/dd/yyyy") &amp; " – " &amp; Format(Parameters!to_date.Value, "MM/dd/yyyy") &amp; "  (" &amp; First(Fields!org_windows_timezone_id.Value, "dsKPI") &amp; ")"</Value>
+            <DataSetName>dsKPI</DataSetName>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#555555</Color><VerticalAlign>Middle</VerticalAlign>
+            </Style>
+            <Top>0.24in</Top><Left>0in</Left>
+            <Width>6in</Width><Height>0.14in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+          <Textbox Name="PageHdrRuntime">
+            <Value>="Generated: " &amp; Format(Globals!ExecutionTime, "MM/dd/yyyy HH:mm") &amp; " UTC"</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#888888</Color><TextAlign>Right</TextAlign>
+            </Style>
+            <Top>0.04in</Top><Left>7in</Left>
+            <Width>3.905in</Width><Height>0.14in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+        </ReportItems>
+        <Style/>
+      </PageHeader>
+
+      <!-- ════════════════════════════════════════════════════════════════
+           PAGE FOOTER
+      ════════════════════════════════════════════════════════════════════ -->
+      <PageFooter>
+        <Height>0.45in</Height>
+        <PrintOnFirstPage>true</PrintOnFirstPage>
+        <PrintOnLastPage>true</PrintOnLastPage>
+        <ReportItems>
+          <Textbox Name="FooterPageNum">
+            <Value>="Page " &amp; Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8pt</FontSize>
+              <Color>#888888</Color><BackgroundColor>#F5F5F5</BackgroundColor>
+              <VerticalAlign>Middle</VerticalAlign>
+              <BorderColor><Bottom>#DDDDDD</Bottom></BorderColor>
+              <BorderStyle><Bottom>Solid</Bottom></BorderStyle>
+            </Style>
+            <Top>0.05in</Top><Left>0in</Left>
+            <Width>2in</Width><Height>0.22in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+          <Textbox Name="FooterConfidential">
+            <Value>CONFIDENTIAL</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>8.5pt</FontSize>
+              <FontWeight>Bold</FontWeight><Color>#CC0000</Color>
+              <BackgroundColor>#F5F5F5</BackgroundColor>
+              <TextAlign>Center</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <BorderColor><Bottom>#DDDDDD</Bottom></BorderColor>
+              <BorderStyle><Bottom>Solid</Bottom></BorderStyle>
+            </Style>
+            <Top>0.05in</Top><Left>4in</Left>
+            <Width>2.905in</Width><Height>0.22in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+          <Textbox Name="FooterPiiNote">
+            <Value>PII minimised — customer first name + last initial only. No PAN. No Vault JOIN.</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7.5pt</FontSize>
+              <Color>#888888</Color><BackgroundColor>#F5F5F5</BackgroundColor>
+              <TextAlign>Right</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <BorderColor><Bottom>#DDDDDD</Bottom></BorderColor>
+              <BorderStyle><Bottom>Solid</Bottom></BorderStyle>
+            </Style>
+            <Top>0.05in</Top><Left>8in</Left>
+            <Width>2.905in</Width><Height>0.22in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+          <Textbox Name="FooterDisclaimer">
+            <Value>Net fees exclude credit-backs on Dispense-Failed (4) and No-ACK (5). transaction_channel=2 kiosk only. Max 90-day range. PCI DSS Req.3. SOC 2 CC6.1/CC4.1.</Value>
+            <Style>
+              <FontFamily>Calibri</FontFamily><FontSize>7pt</FontSize>
+              <Color>#888888</Color><BackgroundColor>#F5F5F5</BackgroundColor>
+              <TextAlign>Center</TextAlign><VerticalAlign>Middle</VerticalAlign>
+              <FontStyle>Italic</FontStyle>
+            </Style>
+            <Top>0.29in</Top><Left>0in</Left>
+            <Width>10.905in</Width><Height>0.14in</Height>
+            <CanGrow>false</CanGrow>
+          </Textbox>
+        </ReportItems>
+        <Style>
+          <BackgroundColor>#F5F5F5</BackgroundColor>
+          <BorderColor><Top>#DDDDDD</Top></BorderColor>
+          <BorderStyle><Top>Solid</Top></BorderStyle>
+        </Style>
+      </PageFooter>
+
+    </ReportSection>
+  </ReportSections>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       DATA SOURCES
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <DataSources>
+    <DataSource Name="GTW_GiftCards_DS">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString>Data Source=&lt;sql-server-hostname&gt;;Initial Catalog=GiftCards;Integrated Security=True;ApplicationIntent=ReadOnly</ConnectString>
+        <IntegratedSecurity>true</IntegratedSecurity>
+        <Prompt></Prompt>
+      </ConnectionProperties>
+      <rd:SecurityType>Integrated</rd:SecurityType>
+      <rd:DataSourceID>GTW_GiftCards_DS</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       DATA SETS
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <DataSets>
+
+    <!-- dsKPI — single KPI summary row (§7.1) + org_windows_timezone_id for header -->
+    <DataSet Name="dsKPI">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_kiosk_transaction_kpi</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+          <QueryParameter Name="@from_date"><Value>=Parameters!from_date.Value</Value></QueryParameter>
+          <QueryParameter Name="@to_date"><Value>=Parameters!to_date.Value</Value></QueryParameter>
+          <QueryParameter Name="@operator_ids"><Value>=IIF(Parameters!operator_ids.Count = 0, Nothing, Join(Parameters!operator_ids.Value, ","))</Value></QueryParameter>
+          <QueryParameter Name="@terminal_ids"><Value>=IIF(Parameters!terminal_ids.Count = 0, Nothing, Join(Parameters!terminal_ids.Value, ","))</Value></QueryParameter>
+          <QueryParameter Name="@card_type_ids"><Value>=IIF(Parameters!card_type_ids.Count = 0, Nothing, Join(Parameters!card_type_ids.Value, ","))</Value></QueryParameter>
+          <QueryParameter Name="@dispense_status_ids"><Value>=IIF(Parameters!dispense_status_ids.Count = 0, Nothing, Join(Parameters!dispense_status_ids.Value, ","))</Value></QueryParameter>
+          <QueryParameter Name="@transaction_status_id"><Value>=Parameters!transaction_status_id.Value</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="total_kiosk_transactions"><DataField>total_kiosk_transactions</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="physical_card_count"><DataField>physical_card_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="virtual_qr_count"><DataField>virtual_qr_count</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="total_cash_dispensed"><DataField>total_cash_dispensed</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="total_undispensed"><DataField>total_undispensed</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="total_fees_net"><DataField>total_fees_net</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="org_windows_timezone_id"><DataField>org_windows_timezone_id</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsDetail — one row per qualifying kiosk transaction (§7.2) -->
+    <DataSet Name="dsDetail">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_kiosk_transaction_detail</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+          <QueryParameter Name="@from_date"><Value>=Parameters!from_date.Value</Value></QueryParameter>
+          <QueryParameter Name="@to_date"><Value>=Parameters!to_date.Value</Value></QueryParameter>
+          <QueryParameter Name="@operator_ids"><Value>=IIF(Parameters!operator_ids.Count = 0, Nothing, Join(Parameters!operator_ids.Value, ","))</Value></QueryParameter>
+          <QueryParameter Name="@terminal_ids"><Value>=IIF(Parameters!terminal_ids.Count = 0, Nothing, Join(Parameters!terminal_ids.Value, ","))</Value></QueryParameter>
+          <QueryParameter Name="@card_type_ids"><Value>=IIF(Parameters!card_type_ids.Count = 0, Nothing, Join(Parameters!card_type_ids.Value, ","))</Value></QueryParameter>
+          <QueryParameter Name="@dispense_status_ids"><Value>=IIF(Parameters!dispense_status_ids.Count = 0, Nothing, Join(Parameters!dispense_status_ids.Value, ","))</Value></QueryParameter>
+          <QueryParameter Name="@transaction_status_id"><Value>=Parameters!transaction_status_id.Value</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="transaction_id"><DataField>transaction_id</DataField><rd:TypeName>System.Int64</rd:TypeName></Field>
+        <Field Name="transaction_reference_number"><DataField>transaction_reference_number</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="transaction_date_local"><DataField>transaction_date_local</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="operator_display_name"><DataField>operator_display_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="terminal_name"><DataField>terminal_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="terminal_serial"><DataField>terminal_serial</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="card_type_display"><DataField>card_type_display</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="card_number_redacted"><DataField>card_number_redacted</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="customer_display"><DataField>customer_display</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="amount_requested"><DataField>amount_requested</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="amount_dispensed"><DataField>amount_dispensed</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="amount_undispensed"><DataField>amount_undispensed</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="fee_net"><DataField>fee_net</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="dispense_status_name"><DataField>dispense_status_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="transaction_status_name"><DataField>transaction_status_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsOperators — P4 population (shared SP from RPT-001) -->
+    <DataSet Name="dsOperators">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_operators_lst</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="operator_id"><DataField>operator_id</DataField><rd:TypeName>System.Int32</rd:TypeName></Field>
+        <Field Name="display_name"><DataField>display_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+    <!-- dsTerminals — P5 population: kiosk-type terminals only (terminal_type_id=1) -->
+    <DataSet Name="dsTerminals">
+      <Query>
+        <DataSourceName>GTW_GiftCards_DS</DataSourceName>
+        <CommandType>StoredProcedure</CommandType>
+        <CommandText>gc.rpt_org_kiosk_terminals_lst</CommandText>
+        <QueryParameters>
+          <QueryParameter Name="@organization_id"><Value>=Parameters!organization_id.Value</Value></QueryParameter>
+        </QueryParameters>
+      </Query>
+      <Fields>
+        <Field Name="terminal_id"><DataField>terminal_id</DataField><rd:TypeName>System.Int64</rd:TypeName></Field>
+        <Field Name="device_name"><DataField>device_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="operator_display_name"><DataField>operator_display_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="display_name"><DataField>display_name</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+
+  </DataSets>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       REPORT PARAMETERS (P1–P8)
+  ══════════════════════════════════════════════════════════════════════════ -->
+  <ReportParameters>
+
+    <!-- P1: organization_id — hidden in S2S mode; visible in interactive mode -->
+    <ReportParameter Name="organization_id">
+      <DataType>Integer</DataType>
+      <Prompt>Organisation ID</Prompt>
+    </ReportParameter>
+
+    <!-- P2: from_date — defaults to first day of current month -->
+    <ReportParameter Name="from_date">
+      <DataType>DateTime</DataType>
+      <DefaultValue>
+        <Values>
+          <Value>=DateSerial(Year(Today()), Month(Today()), 1)</Value>
+        </Values>
+      </DefaultValue>
+      <Prompt>From Date</Prompt>
+    </ReportParameter>
+
+    <!-- P3: to_date — defaults to today; 90-day max enforced in SPs -->
+    <ReportParameter Name="to_date">
+      <DataType>DateTime</DataType>
+      <DefaultValue>
+        <Values>
+          <Value>=Today()</Value>
+        </Values>
+      </DefaultValue>
+      <Prompt>To Date</Prompt>
+    </ReportParameter>
+
+    <!-- P4: operator_ids — multi-value, cascades from P1 via dsOperators -->
+    <ReportParameter Name="operator_ids">
+      <DataType>String</DataType>
+      <MultiValue>true</MultiValue>
+      <Nullable>true</Nullable>
+      <DefaultValue>
+        <Values/>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsOperators</DataSetName>
+          <ValueField>operator_id</ValueField>
+          <LabelField>display_name</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Operators</Prompt>
+    </ReportParameter>
+
+    <!-- P5: terminal_ids — multi-value, kiosk-type only, cascades from P1 -->
+    <ReportParameter Name="terminal_ids">
+      <DataType>String</DataType>
+      <MultiValue>true</MultiValue>
+      <Nullable>true</Nullable>
+      <DefaultValue>
+        <Values/>
+      </DefaultValue>
+      <ValidValues>
+        <DataSetReference>
+          <DataSetName>dsTerminals</DataSetName>
+          <ValueField>terminal_id</ValueField>
+          <LabelField>display_name</LabelField>
+        </DataSetReference>
+      </ValidValues>
+      <Prompt>Terminals (Kiosk)</Prompt>
+    </ReportParameter>
+
+    <!-- P6: card_type_ids — static multi-value: 1=Physical Card, 2=Virtual QR Code -->
+    <ReportParameter Name="card_type_ids">
+      <DataType>String</DataType>
+      <MultiValue>true</MultiValue>
+      <Nullable>true</Nullable>
+      <DefaultValue>
+        <Values/>
+      </DefaultValue>
+      <ValidValues>
+        <ParameterValues>
+          <ParameterValue>
+            <Value>1</Value>
+            <Label>Physical Card</Label>
+          </ParameterValue>
+          <ParameterValue>
+            <Value>2</Value>
+            <Label>Virtual Card — QR Code</Label>
+          </ParameterValue>
+        </ParameterValues>
+      </ValidValues>
+      <Prompt>Card Type</Prompt>
+    </ReportParameter>
+
+    <!-- P7: dispense_status_ids — static multi-value: actual dispense_status_id values -->
+    <ReportParameter Name="dispense_status_ids">
+      <DataType>String</DataType>
+      <MultiValue>true</MultiValue>
+      <Nullable>true</Nullable>
+      <DefaultValue>
+        <Values/>
+      </DefaultValue>
+      <ValidValues>
+        <ParameterValues>
+          <ParameterValue>
+            <Value>3</Value>
+            <Label>Dispense-Success</Label>
+          </ParameterValue>
+          <ParameterValue>
+            <Value>4</Value>
+            <Label>Dispense-Failed</Label>
+          </ParameterValue>
+          <ParameterValue>
+            <Value>5</Value>
+            <Label>No Acknowledgement</Label>
+          </ParameterValue>
+          <ParameterValue>
+            <Value>8</Value>
+            <Label>Dispense_Partial</Label>
+          </ParameterValue>
+        </ParameterValues>
+      </ValidValues>
+      <Prompt>Dispense Status</Prompt>
+    </ReportParameter>
+
+    <!-- P8: transaction_status_id — single-value nullable integer -->
+    <ReportParameter Name="transaction_status_id">
+      <DataType>Integer</DataType>
+      <Nullable>true</Nullable>
+      <DefaultValue>
+        <Values>
+          <Value>=Nothing</Value>
+        </Values>
+      </DefaultValue>
+      <ValidValues>
+        <ParameterValues>
+          <ParameterValue>
+            <Value>=Nothing</Value>
+            <Label>All Statuses</Label>
+          </ParameterValue>
+          <ParameterValue>
+            <Value>0</Value>
+            <Label>Active Only (excl. Reversed)</Label>
+          </ParameterValue>
+          <ParameterValue>
+            <Value>3</Value>
+            <Label>Reversed Only</Label>
+          </ParameterValue>
+        </ParameterValues>
+      </ValidValues>
+      <Prompt>Transaction Status</Prompt>
+    </ReportParameter>
+
+  </ReportParameters>
+
+</Report>
