@@ -1,0 +1,83 @@
+/* CAS-032 §8.2: the dialog, table, chips, banners and buttons use the shared wireframe modal pattern
+   (app.css: .cachet-modal*, .cachet-grid-table, .cachet-chip*, .cachet-banner*). Only the header
+   subtitle, meta line, summary strip, footer disclosure and download spinner are specific here. */
+
+.cachet-report-modal {
+    max-width: 960px;
+}
+
+.cachet-report-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.cachet-report-subtitle {
+    font-size: 11.5px;
+    color: var(--cachet-text-faint);
+}
+
+.cachet-report-close {
+    background: transparent;
+    border: none;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--cachet-text-faint);
+    cursor: pointer;
+}
+
+    .cachet-report-close:hover {
+        color: var(--cachet-text);
+    }
+
+.cachet-report-retry-btn {
+    margin-left: 10px;
+}
+
+.cachet-report-meta {
+    margin: 12px 22px 0;
+    font-size: 11.5px;
+    color: var(--cachet-text-body);
+}
+
+.cachet-report-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin: 8px 22px 12px;
+    font-size: 11px;
+    color: var(--cachet-text-faint);
+}
+
+    .cachet-report-summary strong {
+        color: var(--cachet-text);
+    }
+
+.cachet-report-footer {
+    flex-wrap: wrap;
+}
+
+.cachet-report-disclosure {
+    flex: 1 1 260px;
+    margin: 0;
+    font-size: 10.5px;
+    color: var(--cachet-text-faint);
+}
+
+.cachet-report-spinner {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 6px;
+    vertical-align: -1px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: cachet-report-spin 0.8s linear infinite;
+}
+
+@keyframes cachet-report-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}

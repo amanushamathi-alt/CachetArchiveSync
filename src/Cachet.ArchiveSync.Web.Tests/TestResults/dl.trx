@@ -1,0 +1,189 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="fec6f5f6-1e9b-4bdf-b894-2d41fcea3a6c" name="rakes@RAKESH_OFFICE 2026-10-05 01:02:12" runUser="RAKESH_OFFICE\rakes" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-10-05T01:02:12.9360692-07:00" queuing="2026-10-05T01:02:12.9360695-07:00" start="2026-10-05T01:02:11.1232483-07:00" finish="2026-10-05T01:02:21.4514611-07:00" />
+  <TestSettings name="default" id="84936ce8-825c-44df-96a0-ab4dfb963f1d">
+    <Deployment runDeploymentRoot="rakes_RAKESH_OFFICE_2026-10-05_01_02_12" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="dc37444a-8f15-4287-ae71-fe84176e531f" testId="c0f4f356-864e-d9f1-9de1-487f596345af" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_V4_BadOrWrongTypeTaskIdShowsNotice_BrowseErrorShowsExplorerErrorWithRetry(status: Conflict)" computerName="RAKESH_OFFICE" duration="00:00:00.0075504" startTime="2026-10-05T01:02:21.3032092-07:00" endTime="2026-10-05T01:02:21.3032095-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="dc37444a-8f15-4287-ae71-fe84176e531f" />
+    <UnitTestResult executionId="2e9b1e89-9655-4bd7-9184-38a2f8105171" testId="b5ddee04-d865-8af2-5844-a213c931cd7e" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC12_LegacyTaskOpensAsToday(shape: &quot;legacy-keyword&quot;, radio: &quot;keyword&quot;)" computerName="RAKESH_OFFICE" duration="00:00:00.0072072" startTime="2026-10-05T01:02:21.3310739-07:00" endTime="2026-10-05T01:02:21.3310742-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="2e9b1e89-9655-4bd7-9184-38a2f8105171" />
+    <UnitTestResult executionId="6cecb59c-90bd-43cb-9bf7-989b3219f529" testId="262ad7e0-d8f8-f828-8b48-7666570916e1" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_V4_BadOrWrongTypeTaskIdShowsNotice_BrowseErrorShowsExplorerErrorWithRetry(status: NotFound)" computerName="RAKESH_OFFICE" duration="00:00:00.0308205" startTime="2026-10-05T01:02:21.2952271-07:00" endTime="2026-10-05T01:02:21.2952273-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="6cecb59c-90bd-43cb-9bf7-989b3219f529" />
+    <UnitTestResult executionId="d696a208-f073-44fc-8a1f-a2d5027954c7" testId="aaba1612-ef83-8e5f-6a1c-e0f60920dc71" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC7_ReloadedDateTaskRestoresModeDatesAndHeader" computerName="RAKESH_OFFICE" duration="00:00:00.0350115" startTime="2026-10-05T01:02:12.1694285-07:00" endTime="2026-10-05T01:02:12.1694285-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d696a208-f073-44fc-8a1f-a2d5027954c7" />
+    <UnitTestResult executionId="bc7b16f3-5a8e-4a2c-8c9a-b0df9d630851" testId="723ac7c1-8aef-0850-4297-454ed409ac62" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_V3_InvalidDeepLinkTaskIdShowsErrorBanner" computerName="RAKESH_OFFICE" duration="00:00:00.0115952" startTime="2026-10-05T01:02:21.3148538-07:00" endTime="2026-10-05T01:02:21.3148540-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="bc7b16f3-5a8e-4a2c-8c9a-b0df9d630851" />
+    <UnitTestResult executionId="9c156cd0-f1ce-4cb3-a276-95f2850c00a2" testId="55208e5a-c45a-7987-be68-2d8e92c28d39" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_V4_BadOrWrongTypeTaskIdShowsNotice(taskIdQuery: &quot;404404&quot;)" computerName="RAKESH_OFFICE" duration="00:00:00.0125384" startTime="2026-10-05T01:02:21.2503943-07:00" endTime="2026-10-05T01:02:21.2503969-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9c156cd0-f1ce-4cb3-a276-95f2850c00a2" />
+    <UnitTestResult executionId="7507a36b-99b0-482d-8e60-c98bcd4316de" testId="bfbcec37-6989-aa5d-1747-377d83dd8b04" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC10_CompletedTaskClickRestoresModeAndResults(taskMode: &quot;Date&quot;, radio: &quot;date&quot;, typeLabel: &quot;Date Search&quot;)" computerName="RAKESH_OFFICE" duration="00:00:03.0102501" startTime="2026-10-05T01:02:18.1973133-07:00" endTime="2026-10-05T01:02:18.1973135-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="7507a36b-99b0-482d-8e60-c98bcd4316de">
+      <Output>
+        <ErrorInfo>
+          <Message>Bunit.Extensions.WaitForHelpers.WaitForFailedException : The state predicate did not pass before the timeout period passed. Check count: 1. Component render count: 1. Total render count: 1.</Message>
+          <StackTrace>   at Bunit.RenderedFragmentWaitForHelperExtensions.WaitForState(IRenderedFragmentBase renderedFragment, Func`1 statePredicate, Nullable`1 timeout) in /_/src/bunit.core/Extensions/WaitForHelpers/RenderedFragmentWaitForHelperExtensions.cs:line 32&#xD;
+   at Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.RenderPage(Nullable`1 taskId, Boolean selectKeywordMode) in C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\KeywordSearch\KeywordSearchDeepLinkTests.cs:line 139&#xD;
+   at Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC10_CompletedTaskClickRestoresModeAndResults(String taskMode, String radio, String typeLabel) in C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\KeywordSearch\KeywordSearchDeepLinkTests.cs:line 518&#xD;
+--- End of stack trace from previous location ---</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="6348964b-dc71-45dd-9afa-1dc2278a4e7d" testId="5fd6de7f-650e-6490-0221-9543ff587ae6" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_V4_BadOrWrongTypeTaskIdShowsNotice(taskIdQuery: &quot;880&quot;)" computerName="RAKESH_OFFICE" duration="00:00:00.0035978" startTime="2026-10-05T01:02:21.2597985-07:00" endTime="2026-10-05T01:02:21.2597987-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="6348964b-dc71-45dd-9afa-1dc2278a4e7d" />
+    <UnitTestResult executionId="6dd8c60b-4b9f-4735-93f9-549b9bb9dc77" testId="9a77778f-eea1-c874-a71e-4a8b253522ee" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC12_LegacyTaskOpensAsToday(shape: &quot;legacy-keyword-with-dates&quot;, radio: &quot;keyword&quot;)" computerName="RAKESH_OFFICE" duration="00:00:00.0073761" startTime="2026-10-05T01:02:21.3386339-07:00" endTime="2026-10-05T01:02:21.3386340-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="6dd8c60b-4b9f-4735-93f9-549b9bb9dc77" />
+    <UnitTestResult executionId="9f223c0f-173c-4f35-95bc-a005c3217157" testId="faca681b-cbfc-0072-400f-4cf85f739eb5" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC12_LegacyTaskOpensAsToday(shape: &quot;legacy-date-only&quot;, radio: &quot;date&quot;)" computerName="RAKESH_OFFICE" duration="00:00:00.0087488" startTime="2026-10-05T01:02:21.3237523-07:00" endTime="2026-10-05T01:02:21.3237525-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9f223c0f-173c-4f35-95bc-a005c3217157" />
+    <UnitTestResult executionId="3fce9812-3e37-4d8e-86ce-9522c9d8dfbe" testId="d5e904cb-fa9f-11e3-fc5d-f2f9df66cf20" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC10_CompletedTaskClickRestoresModeAndResults(taskMode: &quot;Keyword&quot;, radio: &quot;keyword&quot;, typeLabel: &quot;Keyword Search&quot;)" computerName="RAKESH_OFFICE" duration="00:00:03.0146143" startTime="2026-10-05T01:02:21.2119151-07:00" endTime="2026-10-05T01:02:21.2119153-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="3fce9812-3e37-4d8e-86ce-9522c9d8dfbe">
+      <Output>
+        <ErrorInfo>
+          <Message>Bunit.Extensions.WaitForHelpers.WaitForFailedException : The state predicate did not pass before the timeout period passed. Check count: 1. Component render count: 1. Total render count: 1.</Message>
+          <StackTrace>   at Bunit.RenderedFragmentWaitForHelperExtensions.WaitForState(IRenderedFragmentBase renderedFragment, Func`1 statePredicate, Nullable`1 timeout) in /_/src/bunit.core/Extensions/WaitForHelpers/RenderedFragmentWaitForHelperExtensions.cs:line 32&#xD;
+   at Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.RenderPage(Nullable`1 taskId, Boolean selectKeywordMode) in C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\KeywordSearch\KeywordSearchDeepLinkTests.cs:line 139&#xD;
+   at Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC10_CompletedTaskClickRestoresModeAndResults(String taskMode, String radio, String typeLabel) in C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\KeywordSearch\KeywordSearchDeepLinkTests.cs:line 518&#xD;
+--- End of stack trace from previous location ---</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="581aab22-7aff-4328-9541-b99cc255ccc4" testId="0c981214-a98d-2af0-89b9-1532698d01df" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_A3_SC13_ReloadedKeywordPlusDateTaskOpensDateModeWithTermHeader" computerName="RAKESH_OFFICE" duration="00:00:00.0147903" startTime="2026-10-05T01:02:21.3537083-07:00" endTime="2026-10-05T01:02:21.3537085-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="581aab22-7aff-4328-9541-b99cc255ccc4" />
+    <UnitTestResult executionId="7523dd86-7967-4ad9-956b-f73beb06f4bc" testId="a19b7c70-7a26-a6b3-5860-ada90ea65216" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_V4_BadOrWrongTypeTaskIdShowsNotice(taskIdQuery: &quot;0&quot;)" computerName="RAKESH_OFFICE" duration="00:00:00.0055017" startTime="2026-10-05T01:02:21.2560627-07:00" endTime="2026-10-05T01:02:21.2560630-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="7523dd86-7967-4ad9-956b-f73beb06f4bc" />
+    <UnitTestResult executionId="66178e67-63b6-4bb5-ba5a-fcd30125d364" testId="64681e48-4c62-e97e-d179-7d60b5e92bce" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_V4_BadOrWrongTypeTaskIdShowsNotice(taskIdQuery: &quot;abc&quot;)" computerName="RAKESH_OFFICE" duration="00:00:00.0043132" startTime="2026-10-05T01:02:21.2642563-07:00" endTime="2026-10-05T01:02:21.2642564-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="66178e67-63b6-4bb5-ba5a-fcd30125d364" />
+    <UnitTestResult executionId="562911f3-8625-4b0c-86d4-3538d30c615f" testId="7d2dbd66-10a7-a1fd-3070-5e86029f0423" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC10_CompletedTaskClickRestoresModeAndResults(taskMode: &quot;Filename&quot;, radio: &quot;filename&quot;, typeLabel: &quot;Filename Search&quot;)" computerName="RAKESH_OFFICE" duration="00:00:03.0107214" startTime="2026-10-05T01:02:15.1909240-07:00" endTime="2026-10-05T01:02:15.1909243-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="562911f3-8625-4b0c-86d4-3538d30c615f">
+      <Output>
+        <ErrorInfo>
+          <Message>Bunit.Extensions.WaitForHelpers.WaitForFailedException : The state predicate did not pass before the timeout period passed. Check count: 1. Component render count: 1. Total render count: 1.</Message>
+          <StackTrace>   at Bunit.RenderedFragmentWaitForHelperExtensions.WaitForState(IRenderedFragmentBase renderedFragment, Func`1 statePredicate, Nullable`1 timeout) in /_/src/bunit.core/Extensions/WaitForHelpers/RenderedFragmentWaitForHelperExtensions.cs:line 32&#xD;
+   at Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.RenderPage(Nullable`1 taskId, Boolean selectKeywordMode) in C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\KeywordSearch\KeywordSearchDeepLinkTests.cs:line 139&#xD;
+   at Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC10_CompletedTaskClickRestoresModeAndResults(String taskMode, String radio, String typeLabel) in C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\KeywordSearch\KeywordSearchDeepLinkTests.cs:line 518&#xD;
+--- End of stack trace from previous location ---</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="20ceec39-da3b-45d9-b576-026a1203ba3a" testId="a2fdfe66-b654-86f1-6b83-da747302433e" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_A2_SC11_ReloadedDateOnlyTaskHeader" computerName="RAKESH_OFFICE" duration="00:00:00.0261404" startTime="2026-10-05T01:02:21.2376169-07:00" endTime="2026-10-05T01:02:21.2376173-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="20ceec39-da3b-45d9-b576-026a1203ba3a" />
+    <UnitTestResult executionId="1e68a030-7321-47e6-855a-0150fe1afb13" testId="7aa4078d-2f6c-303a-d209-a875f0cf534e" testName="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC2_ViewResultsDeepLinksKeywordSearchAndAutoPopulates" computerName="RAKESH_OFFICE" duration="00:00:00.4739393" startTime="2026-10-05T01:02:12.1348790-07:00" endTime="2026-10-05T01:02:12.1348950-07:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="1e68a030-7321-47e6-855a-0150fe1afb13" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC10_CompletedTaskClickRestoresModeAndResults(taskMode: &quot;Keyword&quot;, radio: &quot;keyword&quot;, typeLabel: &quot;Keyword Search&quot;)" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="d5e904cb-fa9f-11e3-fc5d-f2f9df66cf20">
+      <Execution id="3fce9812-3e37-4d8e-86ce-9522c9d8dfbe" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_SC10_CompletedTaskClickRestoresModeAndResults" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC12_LegacyTaskOpensAsToday(shape: &quot;legacy-keyword&quot;, radio: &quot;keyword&quot;)" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="b5ddee04-d865-8af2-5844-a213c931cd7e">
+      <Execution id="2e9b1e89-9655-4bd7-9184-38a2f8105171" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_SC12_LegacyTaskOpensAsToday" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_A2_SC11_ReloadedDateOnlyTaskHeader" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="a2fdfe66-b654-86f1-6b83-da747302433e">
+      <Execution id="20ceec39-da3b-45d9-b576-026a1203ba3a" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_A2_SC11_ReloadedDateOnlyTaskHeader" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC2_ViewResultsDeepLinksKeywordSearchAndAutoPopulates" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="7aa4078d-2f6c-303a-d209-a875f0cf534e">
+      <Execution id="1e68a030-7321-47e6-855a-0150fe1afb13" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_SC2_ViewResultsDeepLinksKeywordSearchAndAutoPopulates" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_V4_BadOrWrongTypeTaskIdShowsNotice(taskIdQuery: &quot;404404&quot;)" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="55208e5a-c45a-7987-be68-2d8e92c28d39">
+      <Execution id="9c156cd0-f1ce-4cb3-a276-95f2850c00a2" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_V4_BadOrWrongTypeTaskIdShowsNotice" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_A3_SC13_ReloadedKeywordPlusDateTaskOpensDateModeWithTermHeader" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="0c981214-a98d-2af0-89b9-1532698d01df">
+      <Execution id="581aab22-7aff-4328-9541-b99cc255ccc4" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_A3_SC13_ReloadedKeywordPlusDateTaskOpensDateModeWithTermHeader" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_V4_BadOrWrongTypeTaskIdShowsNotice(taskIdQuery: &quot;880&quot;)" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="5fd6de7f-650e-6490-0221-9543ff587ae6">
+      <Execution id="6348964b-dc71-45dd-9afa-1dc2278a4e7d" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_V4_BadOrWrongTypeTaskIdShowsNotice" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_V4_BadOrWrongTypeTaskIdShowsNotice(taskIdQuery: &quot;abc&quot;)" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="64681e48-4c62-e97e-d179-7d60b5e92bce">
+      <Execution id="66178e67-63b6-4bb5-ba5a-fcd30125d364" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_V4_BadOrWrongTypeTaskIdShowsNotice" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC12_LegacyTaskOpensAsToday(shape: &quot;legacy-date-only&quot;, radio: &quot;date&quot;)" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="faca681b-cbfc-0072-400f-4cf85f739eb5">
+      <Execution id="9f223c0f-173c-4f35-95bc-a005c3217157" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_SC12_LegacyTaskOpensAsToday" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC10_CompletedTaskClickRestoresModeAndResults(taskMode: &quot;Filename&quot;, radio: &quot;filename&quot;, typeLabel: &quot;Filename Search&quot;)" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="7d2dbd66-10a7-a1fd-3070-5e86029f0423">
+      <Execution id="562911f3-8625-4b0c-86d4-3538d30c615f" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_SC10_CompletedTaskClickRestoresModeAndResults" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC7_ReloadedDateTaskRestoresModeDatesAndHeader" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="aaba1612-ef83-8e5f-6a1c-e0f60920dc71">
+      <Execution id="d696a208-f073-44fc-8a1f-a2d5027954c7" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_SC7_ReloadedDateTaskRestoresModeDatesAndHeader" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_V4_BadOrWrongTypeTaskIdShowsNotice_BrowseErrorShowsExplorerErrorWithRetry(status: NotFound)" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="262ad7e0-d8f8-f828-8b48-7666570916e1">
+      <Execution id="6cecb59c-90bd-43cb-9bf7-989b3219f529" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_V4_BadOrWrongTypeTaskIdShowsNotice_BrowseErrorShowsExplorerErrorWithRetry" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_V4_BadOrWrongTypeTaskIdShowsNotice(taskIdQuery: &quot;0&quot;)" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="a19b7c70-7a26-a6b3-5860-ada90ea65216">
+      <Execution id="7523dd86-7967-4ad9-956b-f73beb06f4bc" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_V4_BadOrWrongTypeTaskIdShowsNotice" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_V4_BadOrWrongTypeTaskIdShowsNotice_BrowseErrorShowsExplorerErrorWithRetry(status: Conflict)" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="c0f4f356-864e-d9f1-9de1-487f596345af">
+      <Execution id="dc37444a-8f15-4287-ae71-fe84176e531f" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_V4_BadOrWrongTypeTaskIdShowsNotice_BrowseErrorShowsExplorerErrorWithRetry" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC12_LegacyTaskOpensAsToday(shape: &quot;legacy-keyword-with-dates&quot;, radio: &quot;keyword&quot;)" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="9a77778f-eea1-c874-a71e-4a8b253522ee">
+      <Execution id="6dd8c60b-4b9f-4735-93f9-549b9bb9dc77" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_SC12_LegacyTaskOpensAsToday" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC10_CompletedTaskClickRestoresModeAndResults(taskMode: &quot;Date&quot;, radio: &quot;date&quot;, typeLabel: &quot;Date Search&quot;)" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="bfbcec37-6989-aa5d-1747-377d83dd8b04">
+      <Execution id="7507a36b-99b0-482d-8e60-c98bcd4316de" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_SC10_CompletedTaskClickRestoresModeAndResults" />
+    </UnitTest>
+    <UnitTest name="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_V3_InvalidDeepLinkTaskIdShowsErrorBanner" storage="c:\work\sourcecode\cachet-archive-file-sync\src\cachet.archivesync.web.tests\bin\debug\net8.0\cachet.archivesync.web.tests.dll" id="723ac7c1-8aef-0850-4297-454ed409ac62">
+      <Execution id="bc7b16f3-5a8e-4a2c-8c9a-b0df9d630851" />
+      <TestMethod codeBase="C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\bin\Debug\net8.0\Cachet.ArchiveSync.Web.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests" name="Test_V3_InvalidDeepLinkTaskIdShowsErrorBanner" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="c0f4f356-864e-d9f1-9de1-487f596345af" executionId="dc37444a-8f15-4287-ae71-fe84176e531f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="b5ddee04-d865-8af2-5844-a213c931cd7e" executionId="2e9b1e89-9655-4bd7-9184-38a2f8105171" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="262ad7e0-d8f8-f828-8b48-7666570916e1" executionId="6cecb59c-90bd-43cb-9bf7-989b3219f529" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="aaba1612-ef83-8e5f-6a1c-e0f60920dc71" executionId="d696a208-f073-44fc-8a1f-a2d5027954c7" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="723ac7c1-8aef-0850-4297-454ed409ac62" executionId="bc7b16f3-5a8e-4a2c-8c9a-b0df9d630851" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="55208e5a-c45a-7987-be68-2d8e92c28d39" executionId="9c156cd0-f1ce-4cb3-a276-95f2850c00a2" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="bfbcec37-6989-aa5d-1747-377d83dd8b04" executionId="7507a36b-99b0-482d-8e60-c98bcd4316de" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="5fd6de7f-650e-6490-0221-9543ff587ae6" executionId="6348964b-dc71-45dd-9afa-1dc2278a4e7d" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="9a77778f-eea1-c874-a71e-4a8b253522ee" executionId="6dd8c60b-4b9f-4735-93f9-549b9bb9dc77" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="faca681b-cbfc-0072-400f-4cf85f739eb5" executionId="9f223c0f-173c-4f35-95bc-a005c3217157" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d5e904cb-fa9f-11e3-fc5d-f2f9df66cf20" executionId="3fce9812-3e37-4d8e-86ce-9522c9d8dfbe" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="0c981214-a98d-2af0-89b9-1532698d01df" executionId="581aab22-7aff-4328-9541-b99cc255ccc4" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a19b7c70-7a26-a6b3-5860-ada90ea65216" executionId="7523dd86-7967-4ad9-956b-f73beb06f4bc" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="64681e48-4c62-e97e-d179-7d60b5e92bce" executionId="66178e67-63b6-4bb5-ba5a-fcd30125d364" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7d2dbd66-10a7-a1fd-3070-5e86029f0423" executionId="562911f3-8625-4b0c-86d4-3538d30c615f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a2fdfe66-b654-86f1-6b83-da747302433e" executionId="20ceec39-da3b-45d9-b576-026a1203ba3a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7aa4078d-2f6c-303a-d209-a875f0cf534e" executionId="1e68a030-7321-47e6-855a-0150fe1afb13" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Failed">
+    <Counters total="17" executed="17" passed="14" failed="3" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.5.3.1+6b60a9e56a (64-bit .NET 8.0.31)&#xD;
+[xUnit.net 00:00:00.10]   Discovering: Cachet.ArchiveSync.Web.Tests&#xD;
+[xUnit.net 00:00:00.18]   Discovered:  Cachet.ArchiveSync.Web.Tests&#xD;
+[xUnit.net 00:00:00.18]   Starting:    Cachet.ArchiveSync.Web.Tests&#xD;
+[xUnit.net 00:00:03.74]       Bunit.Extensions.WaitForHelpers.WaitForFailedException : The state predicate did not pass before the timeout period passed. Check count: 1. Component render count: 1. Total render count: 1.&#xD;
+[xUnit.net 00:00:03.74]       Stack Trace:&#xD;
+[xUnit.net 00:00:03.74]         /_/src/bunit.core/Extensions/WaitForHelpers/RenderedFragmentWaitForHelperExtensions.cs(32,0): at Bunit.RenderedFragmentWaitForHelperExtensions.WaitForState(IRenderedFragmentBase renderedFragment, Func`1 statePredicate, Nullable`1 timeout)&#xD;
+[xUnit.net 00:00:03.74]         C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\KeywordSearch\KeywordSearchDeepLinkTests.cs(139,0): at Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.RenderPage(Nullable`1 taskId, Boolean selectKeywordMode)&#xD;
+[xUnit.net 00:00:03.74]         C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\KeywordSearch\KeywordSearchDeepLinkTests.cs(518,0): at Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC10_CompletedTaskClickRestoresModeAndResults(String taskMode, String radio, String typeLabel)&#xD;
+[xUnit.net 00:00:03.74]         --- End of stack trace from previous location ---&#xD;
+[xUnit.net 00:00:06.75]       Bunit.Extensions.WaitForHelpers.WaitForFailedException : The state predicate did not pass before the timeout period passed. Check count: 1. Component render count: 1. Total render count: 1.&#xD;
+[xUnit.net 00:00:06.75]       Stack Trace:&#xD;
+[xUnit.net 00:00:06.75]         /_/src/bunit.core/Extensions/WaitForHelpers/RenderedFragmentWaitForHelperExtensions.cs(32,0): at Bunit.RenderedFragmentWaitForHelperExtensions.WaitForState(IRenderedFragmentBase renderedFragment, Func`1 statePredicate, Nullable`1 timeout)&#xD;
+[xUnit.net 00:00:06.75]         C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\KeywordSearch\KeywordSearchDeepLinkTests.cs(139,0): at Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.RenderPage(Nullable`1 taskId, Boolean selectKeywordMode)&#xD;
+[xUnit.net 00:00:06.75]         C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\KeywordSearch\KeywordSearchDeepLinkTests.cs(518,0): at Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC10_CompletedTaskClickRestoresModeAndResults(String taskMode, String radio, String typeLabel)&#xD;
+[xUnit.net 00:00:06.75]         --- End of stack trace from previous location ---&#xD;
+[xUnit.net 00:00:09.76]       Bunit.Extensions.WaitForHelpers.WaitForFailedException : The state predicate did not pass before the timeout period passed. Check count: 1. Component render count: 1. Total render count: 1.&#xD;
+[xUnit.net 00:00:09.76]       Stack Trace:&#xD;
+[xUnit.net 00:00:09.76]         /_/src/bunit.core/Extensions/WaitForHelpers/RenderedFragmentWaitForHelperExtensions.cs(32,0): at Bunit.RenderedFragmentWaitForHelperExtensions.WaitForState(IRenderedFragmentBase renderedFragment, Func`1 statePredicate, Nullable`1 timeout)&#xD;
+[xUnit.net 00:00:09.76]         C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\KeywordSearch\KeywordSearchDeepLinkTests.cs(139,0): at Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.RenderPage(Nullable`1 taskId, Boolean selectKeywordMode)&#xD;
+[xUnit.net 00:00:09.76]         C:\Work\Sourcecode\CACHET-archive-file-sync\src\Cachet.ArchiveSync.Web.Tests\KeywordSearch\KeywordSearchDeepLinkTests.cs(518,0): at Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC10_CompletedTaskClickRestoresModeAndResults(String taskMode, String radio, String typeLabel)&#xD;
+[xUnit.net 00:00:09.76]         --- End of stack trace from previous location ---&#xD;
+[xUnit.net 00:00:09.91]   Finished:    Cachet.ArchiveSync.Web.Tests&#xD;
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="RAKESH_OFFICE" outcome="Error" timestamp="2026-10-05T01:02:15.1887506-07:00">
+        <Text>[xUnit.net 00:00:03.74]     Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC10_CompletedTaskClickRestoresModeAndResults(taskMode: "Filename", radio: "filename", typeLabel: "Filename Search") [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="RAKESH_OFFICE" outcome="Error" timestamp="2026-10-05T01:02:18.1968443-07:00">
+        <Text>[xUnit.net 00:00:06.75]     Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC10_CompletedTaskClickRestoresModeAndResults(taskMode: "Date", radio: "date", typeLabel: "Date Search") [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="RAKESH_OFFICE" outcome="Error" timestamp="2026-10-05T01:02:21.2122312-07:00">
+        <Text>[xUnit.net 00:00:09.76]     Cachet.ArchiveSync.Web.Tests.KeywordSearch.KeywordSearchDeepLinkTests.Test_SC10_CompletedTaskClickRestoresModeAndResults(taskMode: "Keyword", radio: "keyword", typeLabel: "Keyword Search") [FAIL]</Text>
+      </RunInfo>
+    </RunInfos>
+  </ResultSummary>
+</TestRun>

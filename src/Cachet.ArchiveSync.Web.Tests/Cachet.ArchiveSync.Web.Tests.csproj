@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup Label="Globals">
+    <SccProjectName>SAK</SccProjectName>
+    <SccProvider>SAK</SccProvider>
+    <SccAuxPath>SAK</SccAuxPath>
+    <SccLocalPath>SAK</SccLocalPath>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <!-- CAS-002: NSubstitute + FluentAssertions per testing-unit convention (CookieForwardingHandlerTests). -->
+    <PackageReference Include="NSubstitute" Version="5.1.0" />
+    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <!-- CAS-021: WebApplicationFactory<Program> integration tests against the real Web Program.cs
+         (login/logout HTTP handlers, cookie-auth pipeline, AuthorizeRouteView/FallbackPolicy gate),
+         matching the Api.IntegrationTests precedent (RealProgramWebApplicationFactory). -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.8" />
+    <!-- CAS-022: bUnit for KeywordSearch.razor component tests (§13 test plan specifies bUnit with
+         a mocked HttpClient/HttpMessageHandler) — not previously a dependency of this project
+         (CAS-021's own test-writer noted this and used integration tests instead for a 2-line gap);
+         CAS-022's spec calls for genuine component-level interaction (checkbox selection, dropdown
+         contents, button disabled state) that WebApplicationFactory-level HTTP tests cannot exercise
+         directly, so it is added here rather than worked around. -->
+    <PackageReference Include="bunit" Version="1.28.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Microsoft.NET.Sdk (not Sdk.Web) does not automatically flow the ASP.NET Core shared
+         framework to this project; CAS-021's WebApplicationFactory<Program> tests need
+         Authentication.Cookies/Authorization/Antiforgery APIs directly, not just transitively via
+         the Web ProjectReference. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Cachet.ArchiveSync.Web\Cachet.ArchiveSync.Web.csproj" />
+  </ItemGroup>
+
+</Project>

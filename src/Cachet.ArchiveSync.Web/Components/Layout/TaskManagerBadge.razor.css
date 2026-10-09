@@ -1,0 +1,12 @@
+/* CAS-030 §8.1: base button/count styling is the shared wireframe toolbar button (app.css:
+   .cachet-btn, .cachet-btn-count). Only the attention state lives here. */
+
+/* §8.1 attention state: a finished task has not yet been viewed. */
+.cachet-task-badge-attention {
+    border-color: var(--cachet-red);
+}
+
+.cachet-task-badge-attention .cachet-task-badge-count {
+    background: var(--cachet-chip-flagged-bg);
+    color: var(--cachet-chip-flagged);
+}

@@ -1,0 +1,12 @@
+Run these in Command Prompt as Administrator.
+
+1. Create the service:
+sc create CachetArchiveSyncWorker binPath= "C:\Work\Cachet.ArchiveSync.Worker\Cachet.ArchiveSync.Worker.exe" start= delayed-auto DisplayName= "Cachet Archive Sync Worker"
+
+2. Start it:
+sc start CachetArchiveSyncWorker
+
+3. Check that it's running:
+sc query CachetArchiveSyncWorker
+
+

@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup Label="Globals">
+    <SccProjectName>SAK</SccProjectName>
+    <SccProvider>SAK</SccProvider>
+    <SccAuxPath>SAK</SccAuxPath>
+    <SccLocalPath>SAK</SccLocalPath>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+    <!-- CAS-005: Dapper + SqlClient for dbo.audit_log_ins (first repository in this project). -->
+    <PackageReference Include="Dapper" Version="2.1.35" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
+    <!-- CAS-010 §3: PDF/XLSX report rendering (BRD §5 — carries forward the existing desktop-client
+         generation approach). PdfSharp and ClosedXML, per CAS-010's explicit package choice. -->
+    <PackageReference Include="PdfSharp" Version="6.1.1" />
+    <PackageReference Include="ClosedXML" Version="0.104.1" />
+    <!-- CAS-012 §5/§14: per-file-type text extraction for filesystem Content Matches, no
+         pre-built external index. PdfPig (pure-managed PDF text extraction) and NPOI (one
+         library covering both legacy binary and OOXML Word/Excel formats — chosen over the Open
+         XML SDK alone, which cannot read .doc/.xls). -->
+    <PackageReference Include="PdfPig" Version="0.1.16" />
+    <PackageReference Include="NPOI" Version="2.6.2" />
+    <PackageReference Include="GHSoftware.WordDocTextExtractor" Version="1.0.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Cachet.ArchiveSync.Core\Cachet.ArchiveSync.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,382 @@
+@* CAS-027 §3/§8: shared Task Manager modal — lists every task the signed-in user submitted
+   (GET /tasks, CAS-026 §6.1), with View Results (Completed rows, §8.3), View Details (Failed rows,
+   inline expansion, §8.4), and Restart (Failed rows, reuses CAS-016's POST /tasks/{taskId}/restart,
+   §8.5). Same non-routed, @ref-opened convention as QuarantineQueueModal.razor (CAS-024) — opened
+   from MainLayout.razor's header button, not a routed @page. *@
+@using Cachet.ArchiveSync.Core.Dtos
+
+@if (isOpen)
+{
+    <div class="cachet-tm-backdrop">
+        <div class="cachet-tm-modal">
+            <div class="cachet-tm-header">
+                <h2>Task Manager</h2>
+            </div>
+
+            @* §8.6/FR-22a: static, always-visible note — not tied to any specific task. *@
+            <div class="cachet-tm-processing-note">
+                Search, scan, and sync tasks run in the background and can take anywhere from about 10
+                minutes to a full day to complete, depending on data volume. You can close this window
+                — or your browser — and come back later; your task will keep running and appear here
+                when it's done.
+            </div>
+
+            @if (listErrorBanner is not null)
+            {
+                <div class="cachet-tm-error-banner">@listErrorBanner</div>
+            }
+
+            @if (isLoading)
+            {
+                <p class="cachet-tm-empty">Loading…</p>
+            }
+            else if (items.Count == 0 && listErrorBanner is null)
+            {
+                <p class="cachet-tm-empty">
+                    No tasks yet. Search, scan, and sync actions you submit will appear here.
+                </p>
+            }
+            else if (items.Count > 0)
+            {
+                <table class="cachet-tm-table">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Submitted By</th>
+                            <th>Start Time</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in items)
+                        {
+                            @* CAS-048 §2.3: only a Completed row is clickable (whole row, keyboard Enter/Space);
+                               every other status is inert and aria-disabled. *@
+                            <tr class="@(IsCompleted(item) ? "cachet-tm-row-clickable" : "cachet-tm-row-inert")"
+                                tabindex="@(IsCompleted(item) ? "0" : null)"
+                                role="@(IsCompleted(item) ? "link" : null)"
+                                aria-disabled="@(IsCompleted(item) ? null : "true")"
+                                title="@(IsCompleted(item) ? null : "Available when the task completes")"
+                                @attributes="RowHandlers(item)">
+                                <td>@TypeLabel(item)</td>
+                                <td>@item.SubmittedBy</td>
+                                <td>@item.StartTime</td>
+                                <td><span class="@StatusChipClass(item.Status)">@item.Status</span></td>
+                                <td>
+                                    @if (string.Equals(item.Status, "Completed", StringComparison.Ordinal))
+                                    {
+                                        <button type="button"
+                                                @onclick="@(() => OpenTaskAsync(item))"
+                                                @onclick:stopPropagation="true"
+                                                @onkeydown:stopPropagation="true">
+                                            View Results
+                                        </button>
+                                    }
+                                    else if (string.Equals(item.Status, "Failed", StringComparison.Ordinal))
+                                    {
+                                        <button type="button" @onclick="@(() => ToggleDetailsAsync(item.TaskId))">
+                                            View Details
+                                        </button>
+                                        <button type="button"
+                                                disabled="@restartInFlight.Contains(item.TaskId)"
+                                                @onclick="@(() => RestartAsync(item.TaskId))">
+                                            Restart
+                                        </button>
+                                    }
+
+                                    @if (rowMessages.TryGetValue(item.TaskId, out var rowMessage))
+                                    {
+                                        <div class="cachet-tm-row-message">@rowMessage</div>
+                                    }
+
+                                    @if (expandedTaskId == item.TaskId)
+                                    {
+                                        <div class="cachet-tm-detail">
+                                            @if (expandedDetailError is not null)
+                                            {
+                                                <span>@expandedDetailError</span>
+                                            }
+                                            else if (expandedDetail is not null)
+                                            {
+                                                <span>@(expandedDetail.ResultDetail ?? "No further detail available.")</span>
+                                            }
+                                            else
+                                            {
+                                                <span>Loading…</span>
+                                            }
+                                        </div>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+
+            <div class="cachet-tm-footer">
+                <button type="button" @onclick="Close">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private const string GenericErrorMessage = "Something went wrong. Please try again.";
+
+    [Inject] private IHttpClientFactory HttpClientFactory { get; set; } = default!;
+    [Inject] private NavigationManager NavigationManager { get; set; } = default!;
+    [Inject] private ILogger<TaskManagerModal> Logger { get; set; } = default!;
+
+    /// <summary>CAS-048 §2.3: raised after a task was opened (and acknowledged) so the host badge can refresh.</summary>
+    [Parameter] public EventCallback OnTaskAcknowledged { get; set; }
+
+    private bool isOpen;
+    private bool isLoading;
+    private IReadOnlyList<TaskListItem> items = Array.Empty<TaskListItem>();
+    private string? listErrorBanner;
+
+    // §7 V6: guards Restart against a double-submit while a request for that row is in flight.
+    private readonly HashSet<int> restartInFlight = new();
+    private readonly Dictionary<int, string> rowMessages = new();
+
+    // §8.4: at most one Failed row's detail expanded inline at a time.
+    private int? expandedTaskId;
+    private TaskDetailResponse? expandedDetail;
+    private string? expandedDetailError;
+
+    /// <summary>Opens the modal and loads the current task list (§8.1). CAS-048 §2.3: opening no longer
+    /// marks anything viewed (<c>POST /tasks/mark-viewed</c> was removed); a task is acknowledged only
+    /// when the user opens it. Invoked by <c>TaskManagerBadge</c> via <c>@ref</c> — this component
+    /// is not a routed page.</summary>
+    public async Task OpenAsync()
+    {
+        isOpen = true;
+        listErrorBanner = null;
+        expandedTaskId = null;
+        expandedDetail = null;
+        expandedDetailError = null;
+        restartInFlight.Clear();
+        rowMessages.Clear();
+
+        await LoadAsync();
+
+        Logger.LogInformation("TaskManagerModal: opened, TaskCount={TaskCount}", items.Count);
+        StateHasChanged();
+    }
+
+    private void Close()
+    {
+        isOpen = false;
+    }
+
+    // CAS-048 §2.3 (CAS-033 Q1): acknowledge a terminal task only when the user opens it. Failures are
+    // logged and never shown (same as the page's own acknowledge, CAS-030 §8.5).
+    private async Task AcknowledgeAsync(int taskId)
+    {
+        var client = HttpClientFactory.CreateClient("CachetApi");
+        try
+        {
+            using var response = await client.PostAsync($"tasks/{taskId}/acknowledge", content: null);
+            if (response.StatusCode != System.Net.HttpStatusCode.NoContent)
+            {
+                Logger.LogWarning("TaskManagerModal: acknowledge of task {TaskId} returned {StatusCode}", taskId, (int)response.StatusCode);
+                return;
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Logger.LogWarning("TaskManagerModal: acknowledge of task {TaskId} failed to reach the Api", taskId);
+            return;
+        }
+
+        await OnTaskAcknowledged.InvokeAsync();
+    }
+
+    private static bool IsCompleted(TaskListItem item) => string.Equals(item.Status, "Completed", StringComparison.Ordinal);
+
+    private static readonly Dictionary<string, object> NoHandlers = new();
+
+    // CAS-048 V5: a non-Completed row gets no handler at all (nothing is attached).
+    private Dictionary<string, object> RowHandlers(TaskListItem item) =>
+        !IsCompleted(item)
+            ? NoHandlers
+            : new Dictionary<string, object>
+            {
+                ["onclick"] = EventCallback.Factory.Create<MouseEventArgs>(this, () => OpenTaskAsync(item)),
+                ["onkeydown"] = EventCallback.Factory.Create<KeyboardEventArgs>(
+                    this,
+                    e => e.Key is "Enter" or " " or "Spacebar" ? OpenTaskAsync(item) : Task.CompletedTask)
+            };
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        listErrorBanner = null;
+
+        var client = HttpClientFactory.CreateClient("CachetApi");
+        HttpResponseMessage response;
+        try
+        {
+            // CAS-048 §2.3 (CAS-033 Q3): one page of up to 100 tasks (the Api's cap, CAS-030 V1), no pager.
+            response = await client.GetAsync("tasks?pageSize=100");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Logger.LogWarning(ex, "TaskManagerModal: unable to reach Api for {Endpoint}", "GET /tasks");
+            listErrorBanner = GenericErrorMessage;
+            isLoading = false;
+            return;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Logger.LogWarning("TaskManagerModal: unexpected {StatusCode} from {Endpoint}", (int)response.StatusCode, "GET /tasks");
+            listErrorBanner = GenericErrorMessage;
+            isLoading = false;
+            return;
+        }
+
+        var body = await response.Content.ReadFromJsonAsync<PagedResult<TaskListItem>>();
+        items = body?.Items ?? Array.Empty<TaskListItem>();
+        isLoading = false;
+    }
+
+    // §0 point 2/3, §8.3: Completed-row navigation. SyncCopy/SyncUpdate/SyncPurge deliberately carry
+    // no ?taskId= — CAS-007's contract cannot resolve a sync action's own taskId independently of its
+    // originating scan.
+    // CAS-048 §2.3: acknowledge the opened task, close the modal, then navigate.
+    // Relative URLs (no leading '/') so they resolve against <base href> (App.razor) — the app is
+    // hosted under an IIS sub-path (e.g. /CachetArchiveSync/), and a root-relative "/odrive-sync"
+    // would drop that path base and 404. Same convention as Routes.razor's NavigateTo("login").
+    private async Task OpenTaskAsync(TaskListItem item)
+    {
+        var url = item.Type switch
+        {
+            "KeywordSearch" => $"./?taskId={item.TaskId}",
+            "ContentScan" => $"odrive-sync?taskId={item.TaskId}",
+            _ => "odrive-sync"
+        };
+
+        await AcknowledgeAsync(item.TaskId);
+        Close();
+        NavigationManager.NavigateTo(url);
+    }
+
+    // §8.4: inline expand/collapse — no navigation, no new screen.
+    private async Task ToggleDetailsAsync(int taskId)
+    {
+        if (expandedTaskId == taskId)
+        {
+            expandedTaskId = null;
+            return;
+        }
+
+        expandedTaskId = taskId;
+        expandedDetail = null;
+        expandedDetailError = null;
+        StateHasChanged();
+
+        // CAS-048 §2.3: opening a Failed task's details counts as opening it.
+        await AcknowledgeAsync(taskId);
+
+        var client = HttpClientFactory.CreateClient("CachetApi");
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.GetAsync($"tasks/{taskId}");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Logger.LogWarning(ex, "TaskManagerModal: unable to reach Api for {Endpoint}", "GET /tasks/{taskId}");
+            expandedDetailError = GenericErrorMessage;
+            return;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Logger.LogWarning("TaskManagerModal: unexpected {StatusCode} from {Endpoint}", (int)response.StatusCode, "GET /tasks/{taskId}");
+            expandedDetailError = GenericErrorMessage;
+            return;
+        }
+
+        expandedDetail = await response.Content.ReadFromJsonAsync<TaskDetailResponse>();
+    }
+
+    private async Task RestartAsync(int taskId)
+    {
+        if (!restartInFlight.Add(taskId))
+        {
+            // §7 V6: already in flight for this row — no double-submit.
+            return;
+        }
+
+        rowMessages.Remove(taskId);
+        StateHasChanged();
+
+        Logger.LogInformation("TaskManagerModal: restart requested, TaskId={TaskId}", taskId);
+
+        var client = HttpClientFactory.CreateClient("CachetApi");
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.PostAsync($"tasks/{taskId}/restart", content: null);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Logger.LogWarning(ex, "TaskManagerModal: unable to reach Api for {Endpoint}", "POST /tasks/{taskId}/restart");
+            rowMessages[taskId] = GenericErrorMessage;
+            restartInFlight.Remove(taskId);
+            return;
+        }
+
+        restartInFlight.Remove(taskId);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            // §8.5: 403/404/409 all covered by the same row-level generic message — this screen does
+            // not distinguish those three cases in its own copy.
+            Logger.LogWarning("TaskManagerModal: unexpected {StatusCode} from {Endpoint}", (int)response.StatusCode, "POST /tasks/{taskId}/restart");
+            rowMessages[taskId] = GenericErrorMessage;
+            return;
+        }
+
+        rowMessages[taskId] = "Restarted as a new task.";
+        await LoadAsync();
+    }
+
+    // §8.2: display label mapping — never the raw enum string.
+    // CAS-048 §2.3: a KeywordSearch row is labelled from searchMode (null = legacy = Keyword Search).
+    private static string TypeLabel(TaskListItem item) => item.Type switch
+    {
+        "KeywordSearch" => item.SearchMode switch
+        {
+            "Filename" => "Filename Search",
+            "Date" => "Date Search",
+            _ => "Keyword Search"
+        },
+        _ => TypeLabel(item.Type)
+    };
+
+    private static string TypeLabel(string type) => type switch
+    {
+        "KeywordSearch" => "Keyword Search",
+        "ContentScan" => "Content Scan",
+        "SyncCopy" => "Copy to B2",
+        "SyncUpdate" => "Update in B2",
+        "SyncPurge" => "Purge from B2",
+        _ => type
+    };
+
+    // §8.2: status chip color mapping. Cancelled is produced by the Keyword Search cancel action
+    // (CAS-056/CAS-057); an unrecognized-but-valid enum value still never breaks the table.
+    private static string StatusChipClass(string status) => status switch
+    {
+        "Queued" => "cachet-tm-chip cachet-tm-chip-queued",
+        "Running" => "cachet-tm-chip cachet-tm-chip-running",
+        "Completed" => "cachet-tm-chip cachet-tm-chip-completed",
+        "Failed" => "cachet-tm-chip cachet-tm-chip-failed",
+        "Cancelled" => "cachet-tm-chip cachet-tm-chip-cancelled",
+        _ => "cachet-tm-chip"
+    };
+}

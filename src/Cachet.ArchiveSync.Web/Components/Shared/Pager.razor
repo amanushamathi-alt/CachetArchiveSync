@@ -1,0 +1,114 @@
+@* CAS-045 §2.2: reusable windowed pager (« ‹ 1 2 3 4 5 … N › » + "Go to page"). Presentation only —
+   the parent owns Page/PageSize/TotalCount and re-fetches in OnPageChanged. Hidden when everything
+   fits on one page (TotalCount <= PageSize). *@
+@if (PageSize > 0 && TotalCount > PageSize)
+{
+    <nav aria-label="Pagination" class="cachet-pager">
+        <button type="button" class="cachet-btn cachet-pager-btn" aria-label="First page" disabled="@(IsLoading || Page <= 1)" @onclick="() => GoToAsync(1)">«</button>
+        <button type="button" class="cachet-btn cachet-pager-btn" aria-label="Previous page" disabled="@(IsLoading || Page <= 1)" @onclick="() => GoToAsync(Page - 1)">‹</button>
+
+        @foreach (var entry in WindowEntries())
+        {
+            if (entry == 0)
+            {
+                <span class="cachet-pager-gap" aria-hidden="true">…</span>
+            }
+            else
+            {
+                var target = entry;
+                <button type="button"
+                        class="cachet-btn cachet-pager-btn cachet-pager-page @(target == Page ? "is-current" : null)"
+                        aria-label="Page @target"
+                        aria-current="@(target == Page ? "page" : null)"
+                        disabled="@IsLoading"
+                        @onclick="() => GoToAsync(target)">@target.ToString("N0")</button>
+            }
+        }
+
+        <button type="button" class="cachet-btn cachet-pager-btn" aria-label="Next page" disabled="@(IsLoading || Page >= LastPage)" @onclick="() => GoToAsync(Page + 1)">›</button>
+        <button type="button" class="cachet-btn cachet-pager-btn" aria-label="Last page" disabled="@(IsLoading || Page >= LastPage)" @onclick="() => GoToAsync(LastPage)">»</button>
+
+        <span class="cachet-pager-goto">
+            <label>
+                Go to page
+                <input type="text" inputmode="numeric" class="cachet-pager-goto-input" aria-label="Go to page" @bind="gotoText" @bind:event="oninput" disabled="@IsLoading" />
+            </label>
+            <button type="button" class="cachet-btn cachet-pager-btn" disabled="@IsLoading" @onclick="GoAsync">Go</button>
+        </span>
+    </nav>
+}
+
+@code {
+    [Parameter] public int Page { get; set; } = 1;
+    [Parameter] public int PageSize { get; set; } = 50;
+    [Parameter] public int TotalCount { get; set; }
+    [Parameter] public bool IsLoading { get; set; }
+    [Parameter] public EventCallback<int> OnPageChanged { get; set; }
+
+    private string? gotoText;
+
+    private int LastPage => PageSize > 0 ? Math.Max(1, (int)Math.Ceiling(TotalCount / (double)PageSize)) : 1;
+
+    // §2.2 window rule: first and last always; current ±2; at either edge 5 consecutive pages;
+    // gaps collapse to a single "…" (returned as 0).
+    private IEnumerable<int> WindowEntries()
+    {
+        var last = LastPage;
+        var current = Math.Clamp(Page, 1, last);
+        var low = Math.Max(1, current - 2);
+        var high = Math.Min(last, current + 2);
+
+        if (current <= 3)
+        {
+            low = 1;
+            high = Math.Min(last, 5);
+        }
+        else if (current >= last - 2)
+        {
+            high = last;
+            low = Math.Max(1, last - 4);
+        }
+
+        var pages = new SortedSet<int> { 1, last };
+        for (var p = low; p <= high; p++)
+        {
+            pages.Add(p);
+        }
+
+        var previous = 0;
+        foreach (var p in pages)
+        {
+            if (previous != 0 && p - previous > 1)
+            {
+                yield return 0;
+            }
+
+            yield return p;
+            previous = p;
+        }
+    }
+
+    private async Task GoToAsync(int page)
+    {
+        var target = Math.Clamp(page, 1, LastPage);
+        if (IsLoading || target == Page)
+        {
+            return;
+        }
+
+        await OnPageChanged.InvokeAsync(target);
+    }
+
+    // §9 V2: integers only, clamped to 1..lastPage; non-numeric input is ignored.
+    private async Task GoAsync()
+    {
+        if (!int.TryParse(gotoText?.Trim(), System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var requested))
+        {
+            return;
+        }
+
+        gotoText = null;
+        await GoToAsync(requested);
+    }
+}

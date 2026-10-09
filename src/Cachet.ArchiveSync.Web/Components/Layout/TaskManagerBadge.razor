@@ -1,0 +1,175 @@
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@using Cachet.ArchiveSync.Core.Dtos
+@using Microsoft.Extensions.Options
+
+@* CAS-030 §8.1 (FR-22): header Task Manager button with a live badge. Its own interactive island
+   because MainLayout stays static. CAS-048 §2.3 (absorbs CAS-033): the button is enabled and this
+   component hosts TaskManagerModal itself, so the pages need no extra markup. *@
+
+<button type="button"
+        class="cachet-btn cachet-btn-square cachet-tm-trigger-btn @(IsAttention ? "cachet-task-badge-attention" : null)"
+        aria-label="@AriaLabel"
+        @onclick="OpenTaskManagerAsync">
+    Task Manager
+    @if (ShowCount)
+    {
+        <span class="cachet-btn-count cachet-task-badge-count">@Total</span>
+    }
+</button>
+<span class="cachet-visually-hidden" aria-live="polite">@liveMessage</span>
+
+<TaskManagerModal @ref="taskManagerModal" OnTaskAcknowledged="RefreshAfterAcknowledgeAsync" />
+
+@code {
+    private const string ComponentName = "TaskManagerBadge";
+    private const string SummaryEndpoint = "GET /tasks/summary";
+
+    [Inject] private IHttpClientFactory HttpClientFactory { get; set; } = default!;
+    [Inject] private IOptions<TaskPollingOptions> PollingOptions { get; set; } = default!;
+    [Inject] private ILogger<TaskManagerBadge> Logger { get; set; } = default!;
+
+    private TaskSummaryResponse? summary;
+    private bool sessionExpired;
+    private string? liveMessage;
+    private CancellationTokenSource? pollCts;
+    private TaskManagerModal? taskManagerModal;
+
+    private async Task OpenTaskManagerAsync()
+    {
+        if (taskManagerModal is not null)
+        {
+            await taskManagerModal.OpenAsync();
+        }
+    }
+
+    // CAS-048 §2.3: a task was opened and acknowledged — refresh the count now rather than at the next tick.
+    private async Task RefreshAfterAcknowledgeAsync()
+    {
+        if (pollCts is { IsCancellationRequested: false } cts)
+        {
+            await RefreshAsync(cts.Token);
+        }
+    }
+
+    private int Total => summary is null ? 0 : summary.ActiveCount + summary.UnacknowledgedTerminalCount;
+
+    // §8.1: no number at 0 (Quarantine Queue / Audit Log pattern); V9: hidden rather than stale.
+    private bool ShowCount => !sessionExpired && Total > 0;
+
+    private bool IsAttention => !sessionExpired && summary is { UnacknowledgedTerminalCount: > 0 };
+
+    private string AriaLabel
+    {
+        get
+        {
+            if (sessionExpired || summary is null || Total == 0)
+            {
+                return "Task Manager";
+            }
+
+            if (summary.UnacknowledgedTerminalCount > 0)
+            {
+                var finished = summary.UnacknowledgedTerminalCount;
+                return $"Task Manager — {finished} finished task{(finished == 1 ? string.Empty : "s")} not yet viewed, {summary.ActiveCount} in progress";
+            }
+
+            return $"Task Manager — {summary.ActiveCount} in progress";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        pollCts = new CancellationTokenSource();
+
+        // SC-5: called immediately, not on the first tick, so the badge is right after navigation.
+        if (await RefreshAsync(pollCts.Token))
+        {
+            _ = PollAsync(pollCts.Token);
+        }
+    }
+
+    private async Task PollAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(PollingOptions.Value.PollInterval);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                var keepPolling = await RefreshAsync(ct);
+                await InvokeAsync(StateHasChanged);
+                if (!keepPolling)
+                {
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Component disposed — stop silently.
+        }
+    }
+
+    /// <summary>Returns <c>false</c> when polling must stop (401, V9). Logs nothing on success (§11).</summary>
+    private async Task<bool> RefreshAsync(CancellationToken ct)
+    {
+        var client = HttpClientFactory.CreateClient("CachetApi");
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.GetAsync("tasks/summary", ct);
+        }
+        catch (Exception ex) when (ex is HttpRequestException || (ex is TaskCanceledException && !ct.IsCancellationRequested))
+        {
+            // V10: keep the last rendered state and retry on the next tick; never show an error.
+            Logger.LogWarning("{Component}: transient poll failure on {Endpoint}", ComponentName, SummaryEndpoint);
+            return true;
+        }
+
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            Logger.LogWarning("{Component}: poll stopped on 401 from {Endpoint}", ComponentName, SummaryEndpoint);
+            sessionExpired = true;
+            return false;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Logger.LogWarning("{Component}: transient poll failure on {Endpoint}", ComponentName, SummaryEndpoint);
+            return true;
+        }
+
+        TaskSummaryResponse? latest;
+        try
+        {
+            latest = await response.Content.ReadFromJsonAsync<TaskSummaryResponse>(cancellationToken: ct);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            Logger.LogWarning("{Component}: transient poll failure on {Endpoint}", ComponentName, SummaryEndpoint);
+            return true;
+        }
+
+        if (latest is null)
+        {
+            return true;
+        }
+
+        // §8.1 / SC-6: the total does not change when a task finishes, so announce the increase
+        // of the unacknowledged-terminal count itself (accessibility only — no toast).
+        if (summary is not null && latest.UnacknowledgedTerminalCount > summary.UnacknowledgedTerminalCount)
+        {
+            liveMessage = "A task has finished.";
+        }
+
+        summary = latest;
+        return true;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        pollCts?.Cancel();
+        pollCts?.Dispose();
+        await ValueTask.CompletedTask;
+    }
+}

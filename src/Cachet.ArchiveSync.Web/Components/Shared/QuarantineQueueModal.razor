@@ -1,0 +1,480 @@
+@* CAS-024 §3/§8: shared Quarantine Queue modal — List (GET /quarantine) + Delete Permanently
+   (POST /quarantine/delete, FR-16/FR-17), reachable from both KeywordSearch.razor and
+   ODriveSyncContentScan.razor via a per-page trigger button (§0/§4 — no global header shell
+   exists yet, same deviation CAS-022/CAS-023 already took). Not a routed @page — a reusable
+   component instantiated with @ref and opened via the public OpenAsync() method. *@
+@using Cachet.ArchiveSync.Core.Dtos
+
+@if (isOpen)
+{
+    <div class="cachet-modal-backdrop">
+        <div class="cachet-modal cachet-qq-modal" role="dialog" aria-modal="true" aria-labelledby="cachet-qq-title">
+            <div class="cachet-modal-header">
+                <h2 id="cachet-qq-title">Quarantine Queue</h2>
+                <button type="button" class="cachet-qq-close" aria-label="Close Quarantine Queue" @onclick="Close">×</button>
+            </div>
+
+            @if (listErrorBanner is not null)
+            {
+                <div class="cachet-banner cachet-banner-error cachet-qq-error-banner">@listErrorBanner</div>
+            }
+
+            <div class="cachet-modal-body">
+                @if (isLoading)
+                {
+                    <p class="cachet-modal-empty">Loading…</p>
+                }
+                else if (items.Count == 0 && listErrorBanner is null)
+                {
+                    <p class="cachet-modal-empty">
+                        Quarantine is empty. Files sent to quarantine from Keyword Search or the Files browser
+                        appear here for final review before permanent deletion.
+                    </p>
+                }
+                else if (items.Count > 0)
+                {
+                    <table class="cachet-grid-table cachet-qq-table">
+                        <thead>
+                            <tr>
+                                <th class="cachet-col-check">
+                                    <input type="checkbox"
+                                           aria-label="Select all on this page"
+                                           title="Select all on this page"
+                                           data-testid="qq-select-all-page"
+                                           checked="@(items.Count > 0 && items.All(i => selectedIds.Contains(i.FileId)))"
+                                           @onchange="@(e => SetAll((bool)e.Value!))" />
+                                </th>
+                                <th>Name / Path</th>
+                                <th class="cachet-col-a">Source Tab</th>
+                                <th class="cachet-col-a">Quarantined On</th>
+                                <th class="cachet-col-status">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in items)
+                            {
+                                <tr>
+                                    <td>
+                                        <input type="checkbox"
+                                               checked="@selectedIds.Contains(item.FileId)"
+                                               @onchange="@(e => ToggleSelection(item.FileId, (bool)e.Value!))" />
+                                    </td>
+                                    <td>
+                                        <button type="button" class="cachet-cell-name cachet-file-link" title="Open @item.Name" @ref="fileLinkRefs[item.FileId]" @onclick="@(() => OpenFileViewer(item.FileIndexId, item.FileId))">@item.Name</button>
+                                        <span class="cachet-cell-path" title="@item.Path">@item.Path</span>
+                                        @if (rowErrors.TryGetValue(item.FileId, out var rowError))
+                                        {
+                                            <div class="cachet-cell-error cachet-qq-row-error">@rowError</div>
+                                        }
+                                    </td>
+                                    <td class="cachet-qq-source-tab">@item.SourceTab</td>
+                                    <td>@item.QuarantinedOn</td>
+                                    <td><span class="@ChipClass(item.Status)">@item.Status</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+
+            @* CAS-052 §2.1: server-side paging (GET /quarantine?page&pageSize); no filter box. *@
+            <QuarantinePager Page="page"
+                             PageSize="pageSize"
+                             TotalCount="totalCount"
+                             IsLoading="isLoading"
+                             TestIdPrefix="qq"
+                             OnPageChanged="GoToPageAsync"
+                             OnPageSizeChanged="ChangePageSizeAsync" />
+
+            <div class="cachet-modal-footer cachet-qq-footer">
+                <button type="button" class="cachet-btn" @onclick="Close">Close</button>
+                @if (selectedIds.Count > 0)
+                {
+                    <button type="button"
+                            class="cachet-btn cachet-qq-clear-selection"
+                            data-testid="qq-clear-selection"
+                            disabled="@isDeleteInFlight"
+                            @onclick="ClearSelection">
+                        Clear selection
+                    </button>
+                }
+                <button type="button"
+                        class="cachet-btn-danger"
+                        disabled="@(selectedIds.Count == 0 || isDeleteInFlight || !hasFullAccess)"
+                        title="@(hasFullAccess ? null : "Requires Full Access")"
+                        @onclick="OpenConfirm">
+                    Delete Permanently (@selectedIds.Count)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    @* CAS-040 §8.2/§8.3: File Viewer for this modal's clickable file names — stacks above this
+       modal (higher z-index, FileViewerModal.razor.css). *@
+    <FileViewerModal FileIndexId="viewerFileIndexId" Context="Quarantine" OnClose="CloseFileViewerAsync" />
+
+    @if (showConfirm)
+    {
+        <div class="cachet-modal-backdrop cachet-modal-backdrop-top">
+            <div class="cachet-confirm cachet-qq-confirm-modal" role="dialog" aria-modal="true">
+                <h2 class="cachet-confirm-title">Permanently Delete Files</h2>
+                <p class="cachet-confirm-warning">
+                    This will permanently delete @confirmCount file(s) from both the local cache and
+                    Backblaze B2. This action cannot be undone.
+                </p>
+                <p class="cachet-qq-confirm-selection" data-testid="qq-confirm-selection">
+                    @confirmCount selected (@confirmOtherPagesCount on other pages)
+                </p>
+                <div class="cachet-confirm-actions">
+                    <button type="button" class="cachet-btn-danger" @onclick="ConfirmDeleteAsync">Yes, delete permanently</button>
+                    <button type="button" class="cachet-btn" @onclick="CancelConfirm">Cancel</button>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private const string GenericErrorMessage = "Something went wrong. Please try again.";
+
+    [Parameter] public EventCallback OnDeleteCompleted { get; set; }
+
+    /// <summary>CAS-052 §2.8: raised whenever the modal is closed, so a host (KeywordSearch.razor's
+    /// Quarantine panel) can reload and reflect deletes made here.</summary>
+    [Parameter] public EventCallback OnClosed { get; set; }
+
+    [Inject] private IHttpClientFactory HttpClientFactory { get; set; } = default!;
+    [Inject] private ILogger<QuarantineQueueModal> Logger { get; set; } = default!;
+    [CascadingParameter] private Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
+    // CAS-024 §12/§7 V3: same mechanism CAS-023 §7 V5/§8 established — CachetFullAccess is exposed
+    // to this circuit as the "b2_capability" claim (CAS-002 §6.4's "Full Access" claim value backing
+    // the CachetFullAccess policy in Program.cs), reused here rather than inventing a new check.
+    private bool hasFullAccess;
+
+    private bool isOpen;
+    private bool isLoading;
+    private IReadOnlyList<QuarantineListItem> items = Array.Empty<QuarantineListItem>();
+    private readonly HashSet<int> selectedIds = new();
+    private readonly Dictionary<int, string> rowErrors = new();
+
+    private bool showConfirm;
+    private int confirmCount;
+    private int confirmOtherPagesCount;
+
+    // CAS-052 §2.1: server-side paging state; reset to defaults every time the modal opens.
+    private const int DefaultPageSize = 25;
+    private int page = 1;
+    private int pageSize = DefaultPageSize;
+    private int totalCount;
+    // Page index that `items` was loaded for - a reload of the same page prunes stale selections (V6).
+    private int loadedPage;
+    private bool isDeleteInFlight;
+
+    private string? listErrorBanner;
+
+    // CAS-040 §8.2/§8.4: File Viewer state; focus returns to the clicked name button on close.
+    private int? viewerFileIndexId;
+    private int? viewerReturnFocusFileId;
+    private readonly Dictionary<int, ElementReference> fileLinkRefs = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthenticationStateTask is not null)
+        {
+            var authState = await AuthenticationStateTask;
+            hasFullAccess = string.Equals(
+                authState.User.FindFirst("b2_capability")?.Value, "Full Access", StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>Opens the modal and loads the current Quarantine Queue (§8.1/§8.2). Invoked by a
+    /// host page via <c>@ref</c> — this component is not a routed page.</summary>
+    public async Task OpenAsync()
+    {
+        isOpen = true;
+        showConfirm = false;
+        rowErrors.Clear();
+        selectedIds.Clear();
+        page = 1;
+        pageSize = DefaultPageSize;
+        totalCount = 0;
+        loadedPage = 0;
+        items = Array.Empty<QuarantineListItem>();
+        Logger.LogInformation("QuarantineQueueModal: opened");
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    private async Task Close()
+    {
+        isOpen = false;
+        showConfirm = false;
+        viewerFileIndexId = null;
+        await OnClosed.InvokeAsync();
+    }
+
+    // CAS-040 §8.2: a name click opens the viewer only — it never touches row selection.
+    private void OpenFileViewer(int fileIndexId, int returnFocusFileId)
+    {
+        viewerReturnFocusFileId = returnFocusFileId;
+        viewerFileIndexId = fileIndexId;
+    }
+
+    // CAS-040 §8.4: closing returns focus to the name button that opened the viewer.
+    private async Task CloseFileViewerAsync()
+    {
+        viewerFileIndexId = null;
+        if (viewerReturnFocusFileId is { } fileId && fileLinkRefs.TryGetValue(fileId, out var button))
+        {
+            try
+            {
+                await button.FocusAsync();
+            }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException)
+            {
+                // Circuit gone or element no longer rendered — nothing to focus.
+            }
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        listErrorBanner = null;
+
+        // CAS-052 §2.4/V6: an out-of-range page (e.g. the last page's rows were deleted) moves to the
+        // new last page with one re-request.
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            if (!await FetchPageAsync())
+            {
+                return;
+            }
+
+            var lastPage = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
+            if (page <= lastPage)
+            {
+                break;
+            }
+
+            page = lastPage;
+        }
+
+        isLoading = false;
+    }
+
+    // Returns false when the request failed (banner set, isLoading cleared).
+    private async Task<bool> FetchPageAsync()
+    {
+        var client = HttpClientFactory.CreateClient("CachetApi");
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.GetAsync($"quarantine?page={page}&pageSize={pageSize}");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Logger.LogWarning(ex, "QuarantineQueueModal: unable to reach Api for {Endpoint}", "GET /quarantine");
+            listErrorBanner = GenericErrorMessage;
+            isLoading = false;
+            return false;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Logger.LogWarning("QuarantineQueueModal: unexpected {StatusCode} from {Endpoint}", (int)response.StatusCode, "GET /quarantine");
+            listErrorBanner = GenericErrorMessage;
+            isLoading = false;
+            return false;
+        }
+
+        // §8.2: re-fetch always replaces the list with server-confirmed state — no optimistic
+        // client-side removal (§15 resolution).
+        var body = await response.Content.ReadFromJsonAsync<QuarantineListResponse>();
+        var previousIds = items.Select(i => i.FileId).ToHashSet();
+        var previousLoadedPage = loadedPage;
+        items = body?.Items ?? Array.Empty<QuarantineListItem>();
+        totalCount = body?.TotalCount ?? 0;
+        loadedPage = page;
+
+        // CAS-052 §9 V6: on a reload of the same page, selected IDs that were on that page but are
+        // gone from the reloaded rows are dropped. IDs on other pages cannot be checked client-side.
+        if (previousLoadedPage == page)
+        {
+            var currentIds = items.Select(i => i.FileId).ToHashSet();
+            selectedIds.RemoveWhere(id => previousIds.Contains(id) && !currentIds.Contains(id));
+        }
+
+        // CAS-052 §2.4: an empty queue is always page 1 of 1.
+        if (totalCount == 0)
+        {
+            page = 1;
+        }
+
+        return true;
+    }
+
+    // CAS-052 §2.1: selection persists across page changes (§9 V5).
+    private async Task GoToPageAsync(int target)
+    {
+        page = target;
+        await LoadAsync();
+    }
+
+    // CAS-052 §2.4/V5: a page-size change returns to page 1 and clears the selection.
+    private async Task ChangePageSizeAsync(int size)
+    {
+        pageSize = size;
+        page = 1;
+        selectedIds.Clear();
+        await LoadAsync();
+    }
+
+    private void ClearSelection()
+    {
+        selectedIds.Clear();
+    }
+
+    private void ToggleSelection(int fileId, bool isChecked)
+    {
+        if (isChecked)
+        {
+            selectedIds.Add(fileId);
+        }
+        else
+        {
+            selectedIds.Remove(fileId);
+        }
+    }
+
+    // Wireframe header select-all checkbox. CAS-052 §2.4/V2: scoped to the current page's rows only.
+    private void SetAll(bool isChecked)
+    {
+        foreach (var item in items)
+        {
+            ToggleSelection(item.FileId, isChecked);
+        }
+    }
+
+    private void OpenConfirm()
+    {
+        if (selectedIds.Count == 0 || isDeleteInFlight || !hasFullAccess)
+        {
+            return;
+        }
+
+        // §8.3 point 1: snapshot the count for the dialog's copy; nothing is submitted until
+        // ConfirmDeleteAsync is explicitly invoked (V2) — CancelConfirm leaves the selection intact
+        // and sends no request.
+        confirmCount = selectedIds.Count;
+        // CAS-052 §2.4: tell the user how many selected files are not visible on this page.
+        confirmOtherPagesCount = selectedIds.Count(id => !items.Any(i => i.FileId == id));
+        showConfirm = true;
+    }
+
+    private void CancelConfirm()
+    {
+        showConfirm = false;
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        showConfirm = false;
+        await SubmitDeleteAsync();
+    }
+
+    private async Task SubmitDeleteAsync()
+    {
+        if (selectedIds.Count == 0 || isDeleteInFlight)
+        {
+            return;
+        }
+
+        isDeleteInFlight = true;
+        listErrorBanner = null;
+        rowErrors.Clear();
+        var fileIds = selectedIds.ToList();
+
+        Logger.LogInformation("QuarantineQueueModal: delete submitted, FileCount={FileCount}", fileIds.Count);
+
+        var client = HttpClientFactory.CreateClient("CachetApi");
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.PostAsJsonAsync("quarantine/delete", new QuarantineDeleteRequest
+            {
+                FileIds = fileIds,
+                Confirm = true
+            });
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Logger.LogWarning(ex, "QuarantineQueueModal: unable to reach Api for {Endpoint}", "POST /quarantine/delete");
+            listErrorBanner = GenericErrorMessage;
+            isDeleteInFlight = false;
+            selectedIds.Clear();
+            return;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            // §7 V4: an unexpected 403/404/422 from either §6 endpoint is surfaced as a modal-level
+            // inline error banner, never an unhandled exception/blank modal.
+            Logger.LogWarning("QuarantineQueueModal: unexpected {StatusCode} from {Endpoint}", (int)response.StatusCode, "POST /quarantine/delete");
+            listErrorBanner = GenericErrorMessage;
+            isDeleteInFlight = false;
+            selectedIds.Clear();
+            return;
+        }
+
+        var body = await response.Content.ReadFromJsonAsync<QuarantineDeleteResponse>();
+        var results = body?.Results ?? Array.Empty<QuarantineDeleteResultItem>();
+
+        // §8.3 point 4: per-file independent outcome — a Failed row's reason is tracked so it can
+        // stay visible with its own inline error after the refresh below; Success rows simply won't
+        // be present in the next GET /quarantine response.
+        var succeededCount = 0;
+        foreach (var result in results)
+        {
+            if (string.Equals(result.Result, "Success", StringComparison.Ordinal))
+            {
+                succeededCount++;
+            }
+            else
+            {
+                rowErrors[result.FileId] = result.Reason ?? "Delete failed — see Audit Log";
+            }
+        }
+
+        Logger.LogInformation(
+            "QuarantineQueueModal: delete completed, SucceededCount={SucceededCount}, FailedCount={FailedCount}",
+            succeededCount, results.Count - succeededCount);
+
+        // §8.3 point 4: selection is cleared for the attempted rows regardless of outcome.
+        selectedIds.Clear();
+        isDeleteInFlight = false;
+
+        await LoadAsync();
+
+        if (succeededCount > 0)
+        {
+            // §3/§8.2: let the host page (e.g. KeywordSearch.razor's embedded read-only Quarantine
+            // panel) refresh its own state. A host that doesn't bind this callback (e.g.
+            // ODriveSyncContentScan.razor, unless it opts in) simply receives a no-op invocation.
+            await OnDeleteCompleted.InvokeAsync();
+        }
+    }
+
+    // Mirrors KeywordSearch.razor's own ChipClass helper (CAS-025 §3/§8.5) — duplicated locally
+    // rather than extracted to a shared utility, since this is the component's own presentational
+    // mapping and no second real call site exists yet beyond this file (Karpathy P4).
+    private static string ChipClass(string? status) => status switch
+    {
+        "Flagged" => "cachet-chip cachet-chip-flagged cachet-qq-chip",
+        "Needs Review" => "cachet-chip cachet-chip-needs-review cachet-qq-chip",
+        "Informational" => "cachet-chip cachet-chip-informational cachet-qq-chip",
+        "Quarantined" => "cachet-chip cachet-chip-needs-review cachet-qq-chip",
+        _ => "cachet-chip cachet-chip-neutral cachet-qq-chip"
+    };
+}

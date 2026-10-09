@@ -1,0 +1,147 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Mvc
+
+<PageTitle>Sign In</PageTitle>
+
+@* CAS-021 §8.1/§8.2: static server-rendered page (no @rendermode) so the named-form POST-back
+   below runs against a real HTTP request/response — the only way AuthController.Login's
+   Set-Cookie header can actually reach the browser (see §8.2). Do not add @rendermode here. *@
+
+<div class="cachet-login-page">
+<div class="cachet-login-card">
+    @* CAS-021 §8.1 fix: the wireframe's header block (eyebrow/title/subtitle) — previously
+       omitted from this spec's own §8.1 and, as a result, never built. Verbiage otherwise
+       matches the wireframe verbatim; only the field labels/values change (B2 key → username/
+       password, per FR-01/§0). *@
+    <p class="cachet-login-eyebrow">CACHET</p>
+    <h1 class="cachet-login-title">Archive Files Search &amp; Sync</h1>
+    <p class="cachet-login-subtitle">BackBlaze / O-Drive Identification, Quarantine &amp; Synchronization</p>
+
+    <EditForm Model="Input" FormName="login-form" OnValidSubmit="HandleLoginAsync">
+        <DataAnnotationsValidator />
+
+        @if (bannerMessage is not null)
+        {
+            <p class="cachet-login-banner-error">@bannerMessage</p>
+        }
+
+        <div class="cachet-login-field">
+            <label for="username">Username</label>
+            <InputText @bind-Value="Input.Username" id="username" required />
+        </div>
+
+        <div class="cachet-login-field">
+            <label for="password">Password</label>
+            <InputText @bind-Value="Input.Password" type="password" id="password" required />
+        </div>
+
+        @if (errorMessage is not null)
+        {
+            <p class="cachet-login-inline-error">@errorMessage</p>
+        }
+
+        <button type="submit" id="sign-in-btn" class="cachet-login-submit" disabled>Sign In</button>
+    </EditForm>
+
+    @* CAS-021 §8.1 fix: wireframe's footer help text, reworded for username/password — no B2 key
+       is ever entered here (FR-01/FR-03), so the original "provisioned through the Backblaze
+       console" copy no longer applies. Matches Security Analysis §1: accounts are provisioned
+       only by a TraceCounts administrator, never self-service. Deliberately avoids the phrase
+       "Contact your administrator" (used verbatim by the B2-unavailable error state, §8.3) so
+       this persistent footer text can never be mistaken for that dynamic error message. *@
+    <p class="cachet-login-help">
+        Accounts are provisioned by your TraceCounts administrator — there is no self-service
+        sign-up. Reach out to your admin team if you need a username and password.
+    </p>
+</div>
+</div>
+
+<script src="js/login.js"></script>
+
+@code {
+    [CascadingParameter] public HttpContext HttpContext { get; set; } = default!;
+    [SupplyParameterFromForm] private LoginFormModel Input { get; set; } = new();
+    [Inject] private IHttpClientFactory HttpClientFactory { get; set; } = default!;
+    [Inject] private ILogger<Login> Logger { get; set; } = default!;
+
+    private string? errorMessage;
+    private string? bannerMessage;
+
+    private async Task HandleLoginAsync()
+    {
+        errorMessage = null;
+        bannerMessage = null;
+
+        var client = HttpClientFactory.CreateClient("CachetApi");
+
+        HttpResponseMessage response;
+        try
+        {
+            // Username only — never the password (CAS-021 §11/§12).
+            Logger.LogInformation("Login form submitted for {Username}", Input.Username);
+            response = await client.PostAsJsonAsync(
+                "login",
+                new { username = Input.Username, password = Input.Password },
+                HttpContext.RequestAborted);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Logger.LogWarning(ex, "Login form submission failed: unable to reach Api");
+            bannerMessage = "Sign-in is temporarily unavailable. Please try again.";
+            Input.Password = string.Empty;
+            return;
+        }
+
+        // Cleared immediately after use, win or lose (CAS-021 §12/§10 SC-7) — the password must
+        // never remain bound to Input past this point, so it can't leak back into the re-rendered
+        // <input value="..."> on any subsequent render of this component (success redirect included).
+        Input.Password = string.Empty;
+
+        if (response.IsSuccessStatusCode)
+        {
+            // Forward Api's Set-Cookie verbatim onto this request's real browser response
+            // (CAS-021 §8.2) — Web never decodes or reconstructs the claims payload.
+            if (response.Headers.TryGetValues("Set-Cookie", out var cookies))
+            {
+                foreach (var cookie in cookies)
+                {
+                    HttpContext.Response.Headers.Append("Set-Cookie", cookie);
+                }
+            }
+
+            HttpContext.Response.Redirect($"{HttpContext.Request.PathBase}/");
+            return;
+        }
+
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            var problem = await response.Content.ReadFromJsonAsync<ProblemDetails>(HttpContext.RequestAborted);
+            var isB2Unavailable = problem?.Type?.Contains("b2-access-unavailable") == true;
+
+            errorMessage = isB2Unavailable
+                ? "Your account cannot currently access the archive. Contact your administrator."
+                : "Incorrect username or password.";
+
+            Logger.LogWarning(
+                "Login form submission failed: {Reason}",
+                isB2Unavailable ? "b2-access-unavailable" : "invalid-credentials");
+            return;
+        }
+
+        Logger.LogWarning("Login form submission failed: unexpected status {StatusCode}", (int)response.StatusCode);
+        bannerMessage = "Sign-in is temporarily unavailable. Please try again.";
+    }
+
+    private sealed class LoginFormModel
+    {
+        [Required]
+        public string Username { get; set; } = string.Empty;
+
+        /// <summary>Plaintext, as submitted by the form. Never logged (CAS-021 §11/§12).</summary>
+        [Required]
+        public string Password { get; set; } = string.Empty;
+    }
+}

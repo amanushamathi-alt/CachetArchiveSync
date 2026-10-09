@@ -1,0 +1,1312 @@
+@* CAS-044 §3/§8.2-§8.5 (FR-29): Files landing mode — a Windows-Explorer-style folder tree (left) and
+   Name / Date modified / Type / Size list (right) over the B2 archive index. Data comes only from
+   Api GET files/browse (CAS-043 §6) through FilesBrowseClient. Security (§12): names are rendered
+   through Razor's default encoding (no MarkupString, no href built from a name); a folder path is
+   sent to the Api only when it came from an earlier response (V8); files open by integer id only
+   (V7); nothing is audited here — the Api audits file opens/downloads. Nothing is stored in the
+   browser and nothing is cached across circuits. *@
+@using System.Globalization
+@using Cachet.ArchiveSync.Core.Dtos
+@using Cachet.ArchiveSync.Core.Interfaces
+@using Cachet.ArchiveSync.Web.Http
+@using Microsoft.AspNetCore.Components.Authorization
+@implements IDisposable
+
+<div id="fe-root" class="fe-root">
+    @if (sessionExpired)
+    {
+        <div class="cachet-banner cachet-banner-error fe-banner fe-session-expired" role="alert">
+            @SessionExpiredMessage <a href="login">Sign in</a>
+        </div>
+    }
+    else
+    {
+        <div class="fe-body">
+            <nav id="fe-tree" class="fe-tree" aria-label="Folders">
+                @if (rootNode is not null)
+                {
+                    <ul role="tree" class="fe-tree-root">
+                        @RenderNode(rootNode)
+                    </ul>
+                }
+                @if (treeError is not null)
+                {
+                    <p class="fe-tree-error" role="alert">@treeError</p>
+                }
+            </nav>
+
+            <section class="fe-main" aria-label="Folder contents">
+                <div class="fe-pathbar">
+                    <button type="button"
+                            id="fe-up"
+                            class="cachet-btn fe-up"
+                            aria-label="Up one level"
+                            title="Up one level"
+                            disabled="@(listing?.Parent is null)"
+                            @onclick="OpenParentAsync">
+                        <span aria-hidden="true">&#8593;</span>
+                    </button>
+                    <ol id="fe-breadcrumb" class="fe-breadcrumb" aria-label="Current folder path">
+                        @if (listing is not null)
+                        {
+                            @foreach (var crumb in Crumbs)
+                            {
+                                <li class="fe-crumb">
+                                    @if (crumb.IsCurrent)
+                                    {
+                                        <span class="fe-crumb-current" aria-current="page">@crumb.Name</span>
+                                    }
+                                    else
+                                    {
+                                        <button type="button" class="fe-crumb-link" @onclick="@(() => OpenFolderAsync(crumb.Path))">@crumb.Name</button>
+                                    }
+                                </li>
+                            }
+                        }
+                    </ol>
+                    <div class="fe-filter">
+                        <label for="fe-filter" class="cachet-visually-hidden">Filter this folder</label>
+                        <input id="fe-filter"
+                               class="cachet-input"
+                               type="text"
+                               placeholder="Filter this folder"
+                               value="@filterText"
+                               @oninput="OnFilterInput" />
+                    </div>
+                </div>
+
+                @if (folderGoneNotice)
+                {
+                    <p class="fe-message fe-folder-gone" role="status">@FolderGoneMessage</p>
+                }
+
+                @if (quarantineMessage is not null)
+                {
+                    <p class="fe-message fe-quarantine-message @(quarantineMessageIsError ? "fe-quarantine-error" : null)" role="@(quarantineMessageIsError ? "alert" : "status")">@quarantineMessage</p>
+                }
+
+                @if (selectionMessage is not null)
+                {
+                    <p class="fe-message fe-selection-message" role="alert">@selectionMessage</p>
+                }
+
+                <div class="fe-list-pane">
+                    @if (loadFailed)
+                    {
+                        <div class="fe-message fe-error" role="alert">
+                            <p>@GenericErrorMessage</p>
+                            <button type="button" id="fe-retry" class="cachet-btn fe-retry" @onclick="RetryAsync">Retry</button>
+                        </div>
+                    }
+                    else if (listing is not null)
+                    {
+                        @if (rows.Count == 0)
+                        {
+                            <p class="fe-message fe-empty">@EmptyMessage</p>
+                        }
+                        else
+                        {
+                            <div id="fe-list" class="fe-list-scroll">
+                                <table class="fe-table">
+                                    <colgroup>
+                                        @if (ShowSelection)
+                                        {
+                                            <col class="fe-col-check" />
+                                        }
+                                        @if (ShowQuarantine)
+                                        {
+                                            <col class="fe-col-check" />
+                                        }
+                                        <col class="fe-col-name" />
+                                        <col class="fe-col-date" />
+                                        <col class="fe-col-type" />
+                                        <col class="fe-col-size" />
+                                    </colgroup>
+                                    <thead>
+                                        <tr>
+                                            @if (ShowSelection)
+                                            {
+                                                <th scope="col" class="fe-cell-check">
+                                                    <input type="checkbox"
+                                                           class="fe-check fe-check-all"
+                                                           aria-label="Select everything in this folder"
+                                                           checked="@(headerState == CheckState.All)"
+                                                           data-state="@StateName(headerState)"
+                                                           aria-checked="@(headerState == CheckState.Mixed ? "mixed" : null)"
+                                                           @onchange="@(e => ToggleAllAsync((bool)e.Value!))" />
+                                                </th>
+                                            }
+                                            @if (ShowQuarantine)
+                                            {
+                                                @* CAS-051 §2.6: no header "select all" in Files mode. *@
+                                                <th scope="col" class="fe-cell-check"><span class="cachet-visually-hidden">Quarantine</span></th>
+                                            }
+                                            <th scope="col">Name</th>
+                                            <th scope="col">Date modified</th>
+                                            <th scope="col">Type</th>
+                                            <th scope="col" class="fe-num">Size</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <Virtualize Items="rows" ItemSize="RowHeightPx" SpacerElement="tr" Context="row">
+                                            @if (row.Folder is { } folder)
+                                            {
+                                                <tr class="fe-row fe-row-folder"
+                                                    @key="@(row.Key + ":" + checkResetVersion)"
+                                                    tabindex="0"
+                                                    @ref="rowRefs[row.Key]"
+                                                    @onclick="@(() => OpenFolderAsync(folder.Path))"
+                                                    @onkeydown="@(e => OnFolderRowKeyDownAsync(e, folder.Path))">
+                                                    @if (ShowSelection)
+                                                    {
+                                                        var folderState = FolderState(folder.Path);
+                                                        <td class="fe-cell-check">
+                                                            <input type="checkbox"
+                                                                   class="fe-check"
+                                                                   aria-label="Select all matches in @folder.Name"
+                                                                   checked="@(folderState == CheckState.All)"
+                                                                   data-state="@StateName(folderState)"
+                                                                   aria-checked="@(folderState == CheckState.Mixed ? "mixed" : null)"
+                                                                   @onclick:stopPropagation="true"
+                                                                   @onkeydown:stopPropagation="true"
+                                                                   @onchange="@(e => ToggleFolderAsync(folder.Path, (bool)e.Value!))" />
+                                                        </td>
+                                                    }
+                                                    @if (ShowQuarantine)
+                                                    {
+                                                        <td class="fe-cell-check">
+                                                            @if (FolderCounts(folder.Name) is { TotalFiles: > 0 } counts)
+                                                            {
+                                                                var qState = QuarantineFolderState(counts);
+                                                                <input type="checkbox"
+                                                                       class="fe-check fe-check-quarantine"
+                                                                       aria-label="Select or deselect all files in @folder.Name"
+                                                                       checked="@(qState == CheckState.All)"
+                                                                       data-state="@StateName(qState)"
+                                                                       aria-checked="@(qState == CheckState.Mixed ? "mixed" : null)"
+                                                                       @ref="checkRefs[row.Key]"
+                                                                       @onclick:stopPropagation="true"
+                                                                       @onkeydown:stopPropagation="true"
+                                                                       @onchange="@(() => OpenQuarantineDialog(row.Key, folder.Path, folder.Name, counts))" />
+                                                            }
+                                                        </td>
+                                                    }
+                                                    <td class="fe-cell-name"><img class="fe-icon" src="icons/folder-closed.svg" alt="" aria-hidden="true" /><span class="fe-name">@folder.Name</span></td>
+                                                    <td>@FormatDate(folder.LatestModifiedAt)</td>
+                                                    <td>File folder</td>
+                                                    <td class="fe-num"></td>
+                                                </tr>
+                                            }
+                                            else if (row.File is { } file)
+                                            {
+                                                <tr class="fe-row fe-row-file @(selectedFileId == file.FileIndexId ? "is-selected" : null)"
+                                                    @key="@(row.Key + ":" + checkResetVersion)"
+                                                    tabindex="0"
+                                                    data-file-index-id="@file.FileIndexId"
+                                                    aria-selected="@(selectedFileId == file.FileIndexId ? "true" : "false")"
+                                                    @ref="rowRefs[row.Key]"
+                                                    @onclick="@(() => OpenFileAsync(file.FileIndexId))"
+                                                    @onkeydown="@(e => OnFileRowKeyDownAsync(e, file.FileIndexId))">
+                                                    @if (ShowSelection)
+                                                    {
+                                                        <td class="fe-cell-check">
+                                                            @if (file.SearchResultId is { } resultId)
+                                                            {
+                                                                <input type="checkbox"
+                                                                       class="fe-check"
+                                                                       aria-label="Select @file.Name"
+                                                                       checked="@Selected.Contains(resultId)"
+                                                                       @onclick:stopPropagation="true"
+                                                                       @onkeydown:stopPropagation="true"
+                                                                       @onchange="@(e => ToggleFileAsync(resultId, (bool)e.Value!))" />
+                                                            }
+                                                        </td>
+                                                    }
+                                                    @if (ShowQuarantine)
+                                                    {
+                                                        <td class="fe-cell-check">
+                                                            <input type="checkbox"
+                                                                   class="fe-check fe-check-quarantine"
+                                                                   aria-label="Quarantine @file.Name"
+                                                                   checked="@quarantinedFileIds.Contains(file.FileIndexId)"
+                                                                   disabled="@quarantineBusy.Contains(row.Key)"
+                                                                   @ref="checkRefs[row.Key]"
+                                                                   @onclick:stopPropagation="true"
+                                                                   @onkeydown:stopPropagation="true"
+                                                                   @onchange="@(e => ToggleQuarantineFileAsync(row.Key, file.FileIndexId, (bool)e.Value!))" />
+                                                        </td>
+                                                    }
+                                                    <td class="fe-cell-name"><img class="fe-icon fe-icon-file" src="icons/file.svg" alt="" aria-hidden="true" /><span class="fe-name">@file.Name</span></td>
+                                                    <td>@FormatDate(file.ModifiedAt)</td>
+                                                    <td>@TypeName(file.Extension)</td>
+                                                    <td class="fe-num">@FormatSize(file.SizeBytes)</td>
+                                                </tr>
+                                            }
+                                        </Virtualize>
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    }
+
+                    @if (isListLoading)
+                    {
+                        @* §8.4: spinner wheel over the list pane for the whole call; no time limit. *@
+                        <div id="fe-list-spinner" class="fe-spinner-overlay" role="status">
+                            <span class="fe-spinner" aria-hidden="true"></span>
+                            <span class="cachet-visually-hidden">Loading…</span>
+                        </div>
+                    }
+                </div>
+
+                <div id="fe-status" class="fe-status">
+                    <span class="fe-status-count">@ItemCountText</span>
+                    <span class="fe-status-source">@(ResultsMode ? "Matches from your search (metadata only). File contents open on demand." : "Source: B2 archive index (metadata only). File contents open on demand.")</span>
+                </div>
+            </section>
+        </div>
+
+        @if (dialog is { } dlg)
+        {
+            @* CAS-051 §2.4: same dialog pattern as the permanent-delete confirm in QuarantineQueueModal. *@
+            <div class="cachet-modal-backdrop cachet-modal-backdrop-top">
+                <div id="fe-quarantine-dialog" class="cachet-confirm" role="dialog" aria-modal="true" aria-labelledby="fe-quarantine-dialog-title">
+                    <h2 id="fe-quarantine-dialog-title" class="cachet-confirm-title">Quarantine files in @dlg.Name</h2>
+                    @if (dlg.AddCount > 0)
+                    {
+                        <p class="cachet-confirm-warning fe-dialog-add">Quarantine <strong>@FileCountText(dlg.AddCount)</strong> in <em>@dlg.Name</em> and its sub-folders?</p>
+                    }
+                    @if (dlg.RemoveCount > 0)
+                    {
+                        <p class="cachet-confirm-warning fe-dialog-remove">Remove <strong>@FileCountText(dlg.RemoveCount)</strong> in <em>@dlg.Name</em> from Quarantine, including files quarantined from Keyword Search?</p>
+                    }
+                    <p class="fe-dialog-note">Files added to this folder later are not included.</p>
+                    <div class="cachet-confirm-actions">
+                        @if (dlg.AddCount > 0)
+                        {
+                            <button type="button" id="fe-dialog-select-all" class="cachet-btn" disabled="@dialogBusy" @onclick="() => ConfirmQuarantineFolderAsync(true)">@(dlg.RemoveCount > 0 ? "Select all" : "Yes, quarantine")</button>
+                        }
+                        @if (dlg.RemoveCount > 0)
+                        {
+                            <button type="button" id="fe-dialog-deselect-all" class="cachet-btn-danger" disabled="@dialogBusy" @onclick="() => ConfirmQuarantineFolderAsync(false)">@(dlg.AddCount > 0 ? "Deselect all" : "Yes, remove")</button>
+                        }
+                        <button type="button" id="fe-dialog-cancel" class="cachet-btn" disabled="@dialogBusy" @onclick="CancelQuarantineDialogAsync">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    // §8.4 copy.
+    private const string SessionExpiredMessage = "Your session has expired — sign in again to see results.";
+    private const string FolderGoneMessage = "This folder is no longer in the archive.";
+    private const string GenericErrorMessage = "The folder list could not be loaded. Try again.";
+    private const string TooManySelectedMessage = "Too many files selected (limit 1,000); narrow the selection.";
+    private const string SelectionErrorMessage = "The selection could not be completed. Try again.";
+    private const string QuarantineErrorMessage = "The quarantine action could not be completed. Try again.";
+
+    // §8.2: fixed row height for Virtualize; must match .fe-row height in FileExplorer.razor.css.
+    private const float RowHeightPx = 28;
+
+    private const string DateFormat = "MM/dd/yyyy h:mm tt";
+
+    /// <summary>Raised with the integer <c>fileIndexId</c> of the clicked file (V7).</summary>
+    [Parameter] public EventCallback<int> OnFileOpened { get; set; }
+
+    /// <summary>
+    /// CAS-048 §2.2: null = Files mode (current behavior, <c>GET files/browse</c>). Set = results mode
+    /// over <c>GET search/{ResultsTaskId}/browse</c> (CAS-049). Fixed for the life of the instance;
+    /// the host re-creates the explorer (<c>@@key</c>) when the task changes.
+    /// </summary>
+    [Parameter] public int? ResultsTaskId { get; set; }
+
+    /// <summary>CAS-048 §2.2: show the checkbox column (results mode only).</summary>
+    [Parameter] public bool Selectable { get; set; }
+
+    /// <summary>CAS-048 §2.2: the host-owned set of selected <c>searchResultId</c>s.</summary>
+    [Parameter] public IReadOnlySet<int>? SelectedIds { get; set; }
+
+    /// <summary>CAS-048 §2.2: raised when ids are added to or removed from the selection.</summary>
+    [Parameter] public EventCallback<SelectionChange> OnSelectionChanged { get; set; }
+
+    /// <summary>CAS-048 §2.2: copy for an empty result root (for example "No files matched.").</summary>
+    [Parameter] public string? ResultsEmptyMessage { get; set; }
+
+    /// <summary>CAS-048 §2.2: "M matches in total" for the status bar; omitted when null.</summary>
+    [Parameter] public int? TotalMatches { get; set; }
+
+    /// <summary>Ids added to (<c>Selected</c> true) or removed from the selection.</summary>
+    public sealed record SelectionChange(IReadOnlyCollection<int> Ids, bool Selected);
+
+    [Inject] private FilesBrowseClient Browse { get; set; } = default!;
+    [Inject] private SearchResultsBrowseClient ResultsBrowse { get; set; } = default!;
+    [Inject] private ILogger<FileExplorer> Logger { get; set; } = default!;
+    [Inject] private QuarantineBrowseClient QuarantineBrowse { get; set; } = default!;
+    [Inject] private IConfiguration Configuration { get; set; } = default!;
+    [CascadingParameter] private Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
+    /// <summary>CAS-051 §2.5: raised after a successful Files-mode quarantine add/remove so the host
+    /// refreshes the Quarantine panel and badge.</summary>
+    [Parameter] public EventCallback OnQuarantineChanged { get; set; }
+
+    private sealed class TreeNode
+    {
+        public required string Name { get; set; }
+        public required string Path { get; init; }
+        // null = children not loaded yet.
+        public List<TreeNode>? Children { get; set; }
+        public bool Expanded { get; set; }
+        public bool Loading { get; set; }
+        // CAS-046: from the browse response; true until told otherwise (tolerant default).
+        public bool HasSubfolders { get; set; } = true;
+    }
+
+    private sealed record Row(BrowseFolderItem? Folder, BrowseFileItem? File)
+    {
+        public string Key => Folder is not null ? "d:" + Folder.Path : "f:" + File!.FileIndexId.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private sealed record Crumb(string Name, string Path, bool IsCurrent);
+
+    // Tree: nodes by response-supplied path; the root's path is "" (the Api's root).
+    private readonly Dictionary<string, TreeNode> nodes = new(StringComparer.Ordinal);
+    private TreeNode? rootNode;
+    private string? treeError;
+
+    private FolderBrowseResponse? listing;
+    private List<Row> rows = new();
+    private string filterText = string.Empty;
+    private int? selectedFileId;
+    private readonly Dictionary<string, ElementReference> rowRefs = new();
+
+    // CAS-048 §2.2 selection state. folderIds caches the Api-resolved ids beneath a folder path (V9);
+    // the Web never builds ids itself.
+    private static readonly IReadOnlySet<int> NoSelection = new HashSet<int>();
+    private readonly Dictionary<string, IReadOnlyList<int>> folderIds = new(StringComparer.Ordinal);
+    private string? selectionMessage;
+    private bool selectionBusy;
+    // Bumped when a selection is refused so the rows are re-created and the native checkbox resets.
+    private int checkResetVersion;
+    private CheckState headerState;
+
+    // CAS-051 Files-mode quarantine state. Source is fixed: Files mode browses the B2 archive index.
+    private const string QuarantineSource = "B2";
+    private bool hasFullAccess;
+    private string? bucketName;
+    private bool quarantineStateLoaded;
+    private readonly HashSet<int> quarantinedFileIds = new();
+    private Dictionary<string, QuarantineBrowseStateFolder> quarantineFolders = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> quarantineBusy = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ElementReference> checkRefs = new();
+    private string? quarantineMessage;
+    private bool quarantineMessageIsError;
+    private QuarantineDialog? dialog;
+    private bool dialogBusy;
+
+    private sealed record QuarantineDialog(string RowKey, string Path, string Name, int AddCount, int RemoveCount);
+
+    private bool isListLoading = true;
+    private bool loadFailed;
+    private bool sessionExpired;
+    private bool folderGoneNotice;
+
+    // V8: the last folder path requested (always taken from a response, or "" for the root) — used by Retry.
+    private string? lastRequestedPath;
+
+    // §8.4/SC-15: latest list request wins; earlier calls are cancelled.
+    private CancellationTokenSource? listCts;
+    private readonly CancellationTokenSource disposeCts = new();
+    private bool initialLoadStarted;
+
+    private IEnumerable<Crumb> Crumbs
+    {
+        get
+        {
+            if (listing is null)
+            {
+                yield break;
+            }
+
+            var crumbs = listing.Breadcrumb;
+            yield return new Crumb(listing.RootName, string.Empty, crumbs.Count == 0);
+            for (var i = 0; i < crumbs.Count; i++)
+            {
+                yield return new Crumb(crumbs[i].Name, crumbs[i].Path, i == crumbs.Count - 1);
+            }
+        }
+    }
+
+    private enum CheckState { None, Mixed, All }
+
+    private bool ResultsMode => ResultsTaskId is not null;
+
+    private bool ShowSelection => ResultsMode && Selectable;
+
+    // CAS-051 §2.1/V1: Files mode + Full Access only; shown once the folder's state has been read.
+    private bool ShowQuarantine => !ResultsMode && hasFullAccess && quarantineStateLoaded;
+
+    private IReadOnlySet<int> Selected => SelectedIds ?? NoSelection;
+
+    private static string StateName(CheckState state) => state switch
+    {
+        CheckState.All => "checked",
+        CheckState.Mixed => "mixed",
+        _ => "unchecked"
+    };
+
+    protected override void OnParametersSet() => headerState = ComputeHeaderState();
+
+    // CAS-051 §2.1: same claim mechanism as QuarantineQueueModal (b2_capability == "Full Access").
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthenticationStateTask is not null)
+        {
+            var authState = await AuthenticationStateTask;
+            hasFullAccess = string.Equals(
+                authState.User.FindFirst("b2_capability")?.Value, "Full Access", StringComparison.Ordinal);
+        }
+
+        bucketName = Configuration["B2:BucketName"];
+    }
+
+    private string EmptyMessage =>
+        !string.IsNullOrEmpty(filterText) ? "No items match this filter."
+        : ResultsMode && listing is { Folder: "" } ? (ResultsEmptyMessage ?? "No files matched.")
+        : listing is { Folder: "" } ? "No files are indexed yet."
+        : "This folder is empty.";
+
+    private string ItemCountText
+    {
+        get
+        {
+            var count = rows.Count == 1 ? "1 item" : rows.Count + " items";
+            if (!ResultsMode)
+            {
+                return count;
+            }
+
+            var text = count + " in this folder";
+            return TotalMatches is { } total
+                ? text + " · " + total.ToString("N0", CultureInfo.InvariantCulture) + " matches in total"
+                : text;
+        }
+    }
+
+    // Loaded after the first render (not in OnInitialized) so the prerender pass makes no Api call.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !initialLoadStarted)
+        {
+            initialLoadStarted = true;
+            await LoadFolderAsync(string.Empty);
+        }
+    }
+
+    // CAS-048: Files mode keeps FilesBrowseClient; results mode maps the results client's outcome onto
+    // the same states (a 404/409/5xx is the generic error, a 401 the session-expired message, V7).
+    private async Task<FilesBrowseResult> CallBrowseAsync(string path, bool foldersOnly, CancellationToken ct)
+    {
+        var folder = path.Length == 0 ? null : path;
+        if (ResultsTaskId is not { } taskId)
+        {
+            return await Browse.BrowseAsync(folder, foldersOnly, ct);
+        }
+
+        var result = await ResultsBrowse.BrowseAsync(taskId, folder, foldersOnly, ct);
+        return result.Outcome switch
+        {
+            SearchResultsBrowseOutcome.Success => FilesBrowseResult.Ok(result.Response!),
+            SearchResultsBrowseOutcome.Unauthorized => FilesBrowseResult.Of(FilesBrowseOutcome.Unauthorized),
+            SearchResultsBrowseOutcome.NotFound => FilesBrowseResult.Of(FilesBrowseOutcome.NotFound),
+            _ => FilesBrowseResult.Of(FilesBrowseOutcome.Failed)
+        };
+    }
+
+    private Task OpenFolderAsync(string path)
+    {
+        filterText = string.Empty;
+        folderGoneNotice = false;
+        selectionMessage = null;
+        return LoadFolderAsync(path);
+    }
+
+    private Task OpenParentAsync() =>
+        listing?.Parent is { } parent ? OpenFolderAsync(parent) : Task.CompletedTask;
+
+    private Task RetryAsync() => OpenFolderAsync(lastRequestedPath ?? string.Empty);
+
+    private async Task LoadFolderAsync(string path)
+    {
+        if (sessionExpired)
+        {
+            return;
+        }
+
+        lastRequestedPath = path;
+        listCts?.Cancel();
+        listCts?.Dispose();
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(disposeCts.Token);
+        listCts = cts;
+
+        isListLoading = true;
+        loadFailed = false;
+        StateHasChanged();
+
+        FilesBrowseResult result;
+        try
+        {
+            result = await CallBrowseAsync(path, foldersOnly: false, cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a newer request (latest wins) or the component was disposed.
+            return;
+        }
+
+        if (!ReferenceEquals(cts, listCts))
+        {
+            return;
+        }
+
+        isListLoading = false;
+        switch (result.Outcome)
+        {
+            case FilesBrowseOutcome.Success:
+                ApplyListing(result.Response!);
+                quarantineMessage = null;
+                await LoadQuarantineStateAsync(result.Response!.Folder);
+                break;
+            case FilesBrowseOutcome.Unauthorized:
+                sessionExpired = true;
+                break;
+            case FilesBrowseOutcome.NotFound when path.Length > 0:
+                // V5: message, then back to the root.
+                folderGoneNotice = true;
+                filterText = string.Empty;
+                await LoadFolderAsync(string.Empty);
+                return;
+            default:
+                loadFailed = true;
+                break;
+        }
+
+        StateHasChanged();
+    }
+
+    private void ApplyListing(FolderBrowseResponse response)
+    {
+        listing = response;
+        selectedFileId = null;
+        rowRefs.Clear();
+        checkRefs.Clear();
+        treeError = null;
+        RebuildRows();
+
+        // Tree: root label from the Api; this folder's children from the response; ancestors expanded.
+        if (rootNode is null)
+        {
+            rootNode = new TreeNode { Name = response.RootName, Path = string.Empty, Expanded = true };
+            nodes[string.Empty] = rootNode;
+        }
+        else
+        {
+            rootNode.Name = response.RootName;
+        }
+
+        SetChildren(response.Folder, response.Folders);
+
+        if (nodes.TryGetValue(string.Empty, out var root))
+        {
+            root.Expanded = true;
+        }
+
+        for (var i = 0; i < response.Breadcrumb.Count - 1; i++)
+        {
+            if (nodes.TryGetValue(response.Breadcrumb[i].Path, out var ancestor))
+            {
+                ancestor.Expanded = true;
+            }
+        }
+
+        Logger.LogInformation("Files explorer opened folder at depth {Depth}", response.Breadcrumb.Count);
+    }
+
+    private void SetChildren(string folderPath, IReadOnlyList<BrowseFolderItem> folders)
+    {
+        if (!nodes.TryGetValue(folderPath, out var node))
+        {
+            return;
+        }
+
+        var children = new List<TreeNode>(folders.Count);
+        foreach (var folder in folders)
+        {
+            if (!nodes.TryGetValue(folder.Path, out var child))
+            {
+                child = new TreeNode
+                {
+                    Name = folder.Name,
+                    Path = folder.Path,
+                    HasSubfolders = folder.HasSubfolders
+                };
+                nodes[folder.Path] = child;
+            }
+            else
+            {
+                child.Name = folder.Name;
+                child.HasSubfolders = folder.HasSubfolders;
+            }
+
+            children.Add(child);
+        }
+
+        node.Children = children;
+    }
+
+    private void RebuildRows()
+    {
+        if (listing is null)
+        {
+            rows = new List<Row>();
+            return;
+        }
+
+        var term = filterText.Trim();
+        var filtered = term.Length > 0;
+        var built = new List<Row>(listing.Folders.Count + listing.Files.Count);
+        foreach (var folder in listing.Folders)
+        {
+            if (!filtered || folder.Name.Contains(term, StringComparison.OrdinalIgnoreCase))
+            {
+                built.Add(new Row(folder, null));
+            }
+        }
+
+        foreach (var file in listing.Files)
+        {
+            if (!filtered || file.Name.Contains(term, StringComparison.OrdinalIgnoreCase))
+            {
+                built.Add(new Row(null, file));
+            }
+        }
+
+        rows = built;
+        headerState = ComputeHeaderState();
+    }
+
+    // SC-9: client-side only — the filter value is never sent anywhere (V8).
+    private void OnFilterInput(ChangeEventArgs e)
+    {
+        filterText = e.Value as string ?? string.Empty;
+        RebuildRows();
+    }
+
+    private async Task ToggleNodeAsync(TreeNode node)
+    {
+        if (node.Loading || sessionExpired)
+        {
+            return;
+        }
+
+        if (node.Children is not null)
+        {
+            node.Expanded = !node.Expanded;
+            return;
+        }
+
+        // SC-6: foldersOnly load, once; the result is cached on the node.
+        node.Loading = true;
+        treeError = null;
+        FilesBrowseResult result;
+        try
+        {
+            result = await CallBrowseAsync(node.Path, foldersOnly: true, disposeCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            node.Loading = false;
+            return;
+        }
+
+        node.Loading = false;
+        switch (result.Outcome)
+        {
+            case FilesBrowseOutcome.Success:
+                SetChildren(node.Path, result.Response!.Folders);
+                node.Expanded = true;
+                break;
+            case FilesBrowseOutcome.Unauthorized:
+                sessionExpired = true;
+                break;
+            case FilesBrowseOutcome.NotFound when node.Path.Length > 0:
+                folderGoneNotice = true;
+                filterText = string.Empty;
+                await LoadFolderAsync(string.Empty);
+                return;
+            default:
+                treeError = GenericErrorMessage;
+                break;
+        }
+    }
+
+    // CAS-051 Files-mode quarantine -----------------------------------------------------------------
+
+    private bool QuarantineEnabled => !ResultsMode && hasFullAccess && !string.IsNullOrWhiteSpace(bucketName);
+
+    // §2.2/SC-6: re-read on every navigation and after every successful action. A failed read hides the
+    // checkbox column (its state would be unknown) with a generic message.
+    private async Task LoadQuarantineStateAsync(string folder)
+    {
+        quarantineStateLoaded = false;
+        quarantinedFileIds.Clear();
+        quarantineFolders = new Dictionary<string, QuarantineBrowseStateFolder>(StringComparer.OrdinalIgnoreCase);
+        if (!QuarantineEnabled)
+        {
+            return;
+        }
+
+        QuarantineBrowseResult<QuarantineBrowseStateResponse> result;
+        try
+        {
+            result = await QuarantineBrowse.GetStateAsync(QuarantineSource, bucketName!, folder, disposeCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        // A newer navigation superseded this one.
+        if (listing is null || !string.Equals(listing.Folder, folder, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        switch (result.Outcome)
+        {
+            case QuarantineBrowseOutcome.Success:
+                quarantinedFileIds.UnionWith(result.Body!.FileIndexIds);
+                foreach (var f in result.Body.Folders)
+                {
+                    quarantineFolders[f.FolderName] = f;
+                }
+
+                quarantineStateLoaded = true;
+                break;
+            case QuarantineBrowseOutcome.Unauthorized:
+                sessionExpired = true;
+                break;
+            default:
+                SetQuarantineMessage(QuarantineErrorMessage, isError: true);
+                break;
+        }
+    }
+
+    private void SetQuarantineMessage(string message, bool isError)
+    {
+        quarantineMessage = message;
+        quarantineMessageIsError = isError;
+    }
+
+    private QuarantineBrowseStateFolder? FolderCounts(string folderName) =>
+        quarantineFolders.TryGetValue(folderName, out var counts) ? counts : null;
+
+    // V5: none / partial / all from quarantinedFiles vs totalFiles.
+    private static CheckState QuarantineFolderState(QuarantineBrowseStateFolder counts) =>
+        counts.QuarantinedFiles <= 0 ? CheckState.None
+        : counts.QuarantinedFiles >= counts.TotalFiles ? CheckState.All
+        : CheckState.Mixed;
+
+    private static string FileCountText(int count) =>
+        count == 1 ? "1 file" : count.ToString("N0", CultureInfo.InvariantCulture) + " files";
+
+    // §2.3/V2/V4: pessimistic - disabled while in flight, reverts on failure, message only after the 200.
+    private async Task ToggleQuarantineFileAsync(string rowKey, int fileIndexId, bool isChecked)
+    {
+        if (!QuarantineEnabled || !quarantineBusy.Add(rowKey))
+        {
+            checkResetVersion++;
+            return;
+        }
+
+        quarantineMessage = null;
+        StateHasChanged();
+
+        var request = new QuarantineBrowseRequest { Scope = "File", FileIndexId = fileIndexId };
+        var succeeded = false;
+        try
+        {
+            succeeded = await SendQuarantineAsync(request, isChecked);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        finally
+        {
+            quarantineBusy.Remove(rowKey);
+        }
+
+        await AfterQuarantineActionAsync(succeeded, rowKey);
+    }
+
+    // Calls add (true) or remove (false); on 200 sets the result message. Returns true only on a 200.
+    private async Task<bool> SendQuarantineAsync(QuarantineBrowseRequest request, bool add)
+    {
+        QuarantineBrowseOutcome outcome;
+        string? successText = null;
+        if (add)
+        {
+            var result = await QuarantineBrowse.AddAsync(request, disposeCts.Token);
+            outcome = result.Outcome;
+            if (result.Body is { } added)
+            {
+                successText = FileCountText(added.Added) + " quarantined, "
+                    + added.AlreadyQuarantined.ToString("N0", CultureInfo.InvariantCulture) + " already quarantined.";
+            }
+        }
+        else
+        {
+            var result = await QuarantineBrowse.RemoveAsync(request, disposeCts.Token);
+            outcome = result.Outcome;
+            if (result.Body is { } removed)
+            {
+                successText = FileCountText(removed.Removed) + " removed.";
+            }
+        }
+
+        switch (outcome)
+        {
+            case QuarantineBrowseOutcome.Success:
+                SetQuarantineMessage(successText!, isError: false);
+                return true;
+            case QuarantineBrowseOutcome.Unauthorized:
+                sessionExpired = true;
+                return false;
+            default:
+                SetQuarantineMessage(QuarantineErrorMessage, isError: true);
+                return false;
+        }
+    }
+
+    private async Task AfterQuarantineActionAsync(bool succeeded, string focusRowKey)
+    {
+        if (succeeded && listing is { } current)
+        {
+            await LoadQuarantineStateAsync(current.Folder);
+            await OnQuarantineChanged.InvokeAsync();
+        }
+
+        // Rebuild the rows so each native checkbox shows the model state (reverts a refused toggle).
+        checkResetVersion++;
+        StateHasChanged();
+        await FocusCheckAsync(focusRowKey);
+    }
+
+    private async Task FocusCheckAsync(string rowKey)
+    {
+        if (checkRefs.TryGetValue(rowKey, out var check))
+        {
+            try
+            {
+                await check.FocusAsync();
+            }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException)
+            {
+                // Circuit gone or the row is no longer rendered (virtualized away) - nothing to focus.
+            }
+        }
+    }
+
+    // §2.4/V3: a folder action always opens the dialog; the native toggle is reset to the model state.
+    private void OpenQuarantineDialog(string rowKey, string path, string name, QuarantineBrowseStateFolder counts)
+    {
+        checkResetVersion++;
+        if (!QuarantineEnabled || dialog is not null)
+        {
+            return;
+        }
+
+        quarantineMessage = null;
+        dialog = new QuarantineDialog(
+            rowKey, path, name,
+            AddCount: Math.Max(0, counts.TotalFiles - counts.QuarantinedFiles),
+            RemoveCount: Math.Max(0, counts.QuarantinedFiles));
+    }
+
+    private async Task CancelQuarantineDialogAsync()
+    {
+        if (dialog is not { } closing || dialogBusy)
+        {
+            return;
+        }
+
+        dialog = null;
+        StateHasChanged();
+        await FocusCheckAsync(closing.RowKey);
+    }
+
+    private async Task ConfirmQuarantineFolderAsync(bool add)
+    {
+        if (dialog is not { } dlg || dialogBusy || !QuarantineEnabled)
+        {
+            return;
+        }
+
+        dialogBusy = true;
+        StateHasChanged();
+
+        var request = new QuarantineBrowseRequest
+        {
+            Scope = "Folder",
+            Source = QuarantineSource,
+            BucketName = bucketName,
+            FolderPath = dlg.Path
+        };
+
+        var succeeded = false;
+        try
+        {
+            succeeded = await SendQuarantineAsync(request, add);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        finally
+        {
+            dialogBusy = false;
+            dialog = null;
+        }
+
+        await AfterQuarantineActionAsync(succeeded, dlg.RowKey);
+    }
+
+    // CAS-048 §2.2 / V9 selection -------------------------------------------------------------------
+
+    private CheckState FolderState(string path)
+    {
+        if (!folderIds.TryGetValue(path, out var ids) || ids.Count == 0)
+        {
+            return CheckState.None;
+        }
+
+        var selected = ids.Count(Selected.Contains);
+        return selected == 0 ? CheckState.None : selected == ids.Count ? CheckState.All : CheckState.Mixed;
+    }
+
+    // The header covers everything listed in the current folder. Unfiltered, that is the folder's whole
+    // resolved set when known; otherwise the listed files plus each listed folder's resolved set.
+    private CheckState ComputeHeaderState()
+    {
+        if (!ShowSelection || listing is null || rows.Count == 0)
+        {
+            return CheckState.None;
+        }
+
+        var ids = new List<int>();
+        var complete = true;
+        if (filterText.Trim().Length == 0 && folderIds.TryGetValue(listing.Folder, out var all))
+        {
+            ids.AddRange(all);
+        }
+        else
+        {
+            foreach (var row in rows)
+            {
+                if (row.File?.SearchResultId is { } id)
+                {
+                    ids.Add(id);
+                }
+                else if (row.Folder is { } folder)
+                {
+                    if (folderIds.TryGetValue(folder.Path, out var beneath))
+                    {
+                        ids.AddRange(beneath);
+                    }
+                    else
+                    {
+                        complete = false;
+                    }
+                }
+            }
+        }
+
+        var selected = ids.Count(Selected.Contains);
+        return complete && ids.Count > 0 && selected == ids.Count ? CheckState.All
+            : selected > 0 ? CheckState.Mixed
+            : CheckState.None;
+    }
+
+    private async Task ToggleFileAsync(int searchResultId, bool isChecked)
+    {
+        if (selectionBusy)
+        {
+            checkResetVersion++;
+            return;
+        }
+
+        selectionMessage = null;
+        await ApplySelectionAsync(new[] { searchResultId }, isChecked);
+    }
+
+    private async Task ToggleFolderAsync(string path, bool isChecked)
+    {
+        if (selectionBusy)
+        {
+            checkResetVersion++;
+            return;
+        }
+
+        selectionMessage = null;
+        selectionBusy = true;
+        try
+        {
+            var ids = await ResolveFolderAsync(path);
+            if (ids is null)
+            {
+                return;
+            }
+
+            await ApplySelectionAsync(ids, isChecked);
+        }
+        finally
+        {
+            selectionBusy = false;
+        }
+    }
+
+    private async Task ToggleAllAsync(bool isChecked)
+    {
+        if (selectionBusy || listing is null)
+        {
+            checkResetVersion++;
+            return;
+        }
+
+        selectionMessage = null;
+        selectionBusy = true;
+        try
+        {
+            var ids = new HashSet<int>();
+            if (filterText.Trim().Length == 0)
+            {
+                var all = await ResolveFolderAsync(listing.Folder);
+                if (all is null)
+                {
+                    return;
+                }
+
+                ids.UnionWith(all);
+            }
+            else
+            {
+                foreach (var row in rows.ToList())
+                {
+                    if (row.File?.SearchResultId is { } id)
+                    {
+                        ids.Add(id);
+                    }
+                    else if (row.Folder is { } folder)
+                    {
+                        var beneath = await ResolveFolderAsync(folder.Path);
+                        if (beneath is null)
+                        {
+                            return;
+                        }
+
+                        ids.UnionWith(beneath);
+                    }
+                }
+            }
+
+            await ApplySelectionAsync(ids.ToList(), isChecked);
+        }
+        finally
+        {
+            selectionBusy = false;
+        }
+    }
+
+    // V9: ids beneath a folder come only from the Api (cached per path); over-cap or error selects nothing.
+    private async Task<IReadOnlyList<int>?> ResolveFolderAsync(string path)
+    {
+        if (folderIds.TryGetValue(path, out var cached))
+        {
+            return cached;
+        }
+
+        if (ResultsTaskId is not { } taskId)
+        {
+            return null;
+        }
+
+        SearchResultIdsClientResult result;
+        try
+        {
+            result = await ResultsBrowse.GetResultIdsAsync(taskId, path.Length == 0 ? null : path, disposeCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+
+        switch (result.Outcome)
+        {
+            case SearchResultsBrowseOutcome.Success:
+                folderIds[path] = result.Ids!;
+                return result.Ids;
+            case SearchResultsBrowseOutcome.Unauthorized:
+                sessionExpired = true;
+                break;
+            case SearchResultsBrowseOutcome.SelectionTooLarge:
+                selectionMessage = TooManySelectedMessage;
+                break;
+            default:
+                selectionMessage = SelectionErrorMessage;
+                break;
+        }
+
+        checkResetVersion++;
+        return null;
+    }
+
+    // Enforces the 1,000-file total-selection cap (CAS-049 Q8) before telling the host.
+    private async Task ApplySelectionAsync(IReadOnlyCollection<int> ids, bool select)
+    {
+        if (select)
+        {
+            var added = ids.Count(id => !Selected.Contains(id));
+            if (Selected.Count + added > ISearchResultBrowseService.ResultIdsLimit)
+            {
+                selectionMessage = TooManySelectedMessage;
+                checkResetVersion++;
+                return;
+            }
+        }
+
+        await OnSelectionChanged.InvokeAsync(new SelectionChange(ids, select));
+        headerState = ComputeHeaderState();
+    }
+
+    private async Task OpenFileAsync(int fileIndexId)
+    {
+        selectedFileId = fileIndexId;
+        await OnFileOpened.InvokeAsync(fileIndexId);
+    }
+
+    private Task OnFileRowKeyDownAsync(KeyboardEventArgs e, int fileIndexId) =>
+        string.Equals(e.Key, "Enter", StringComparison.Ordinal) ? OpenFileAsync(fileIndexId) : Task.CompletedTask;
+
+    private Task OnFolderRowKeyDownAsync(KeyboardEventArgs e, string path) =>
+        string.Equals(e.Key, "Enter", StringComparison.Ordinal) ? OpenFolderAsync(path) : Task.CompletedTask;
+
+    /// <summary>§8.3: the host calls this when the File Viewer closes, to return focus to the row.</summary>
+    public async Task FocusSelectedRowAsync()
+    {
+        if (selectedFileId is { } id
+            && rowRefs.TryGetValue("f:" + id.ToString(CultureInfo.InvariantCulture), out var row))
+        {
+            try
+            {
+                await row.FocusAsync();
+            }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException)
+            {
+                // Circuit gone or the row is no longer rendered (virtualized away) — nothing to focus.
+            }
+        }
+    }
+
+    private RenderFragment RenderNode(TreeNode node) => @<li role="treeitem"
+                                                              class="fe-node"
+                                                              aria-expanded="@(HasChevron(node) ? (node.Expanded ? "true" : "false") : null)"
+                                                              aria-selected="@(IsCurrent(node) ? "true" : "false")"
+                                                              aria-busy="@(node.Loading ? "true" : null)">
+        <div class="fe-node-row @(IsCurrent(node) ? "is-current" : null)">
+            @if (HasChevron(node))
+            {
+                <button type="button"
+                        class="fe-chevron"
+                        aria-label="@(node.Expanded ? "Collapse" : "Expand") @node.Name"
+                        @onclick="@(() => ToggleNodeAsync(node))">@(node.Expanded ? "▾" : "▸")</button>
+            }
+            else
+            {
+                <span class="fe-chevron-spacer" aria-hidden="true"></span>
+            }
+            <img class="fe-icon" src="@NodeIcon(node)" alt="" aria-hidden="true" />
+            <button type="button" class="fe-node-name" @onclick="@(() => OpenFolderAsync(node.Path))">@node.Name</button>
+            @if (node.Loading)
+            {
+                <span class="fe-spinner fe-spinner-small" aria-hidden="true"></span>
+            }
+        </div>
+        @if (node.Expanded && node.Children is { Count: > 0 })
+        {
+            <ul role="group" class="fe-tree-children">
+                @foreach (var child in node.Children)
+                {
+                    @RenderNode(child)
+                }
+            </ul>
+        }
+    </li>;
+
+    private static bool HasChevron(TreeNode node) => node.Children is null ? node.HasSubfolders : node.Children.Count > 0;
+
+    // Open-folder image for the open folder and for expanded nodes; closed-folder image otherwise.
+    private string NodeIcon(TreeNode node) =>
+        IsCurrent(node) || (node.Expanded && node.Children is { Count: > 0 })
+            ? "icons/folder-open.svg"
+            : "icons/folder-closed.svg";
+
+    private bool IsCurrent(TreeNode node) =>
+        listing is not null && string.Equals(node.Path, listing.Folder, StringComparison.Ordinal);
+
+    // §8.2: shown exactly as read from the database; no time-zone conversion.
+    private static string FormatDate(DateTimeOffset? value) =>
+        value is { } v ? v.ToString(DateFormat, CultureInfo.InvariantCulture) : string.Empty;
+
+    // §8.2: B / KB / MB.
+    // Written with if/return (not relational switch patterns) so the Razor design-time parser in
+    // Visual Studio does not read a leading '<' as an HTML tag.
+    private static string FormatSize(long bytes)
+    {
+        const long OneKb = 1024;
+        const long OneMb = 1024 * 1024;
+        var culture = CultureInfo.InvariantCulture;
+
+        if (bytes >= OneMb)
+        {
+            return (bytes / (double)OneMb).ToString("N1", culture) + " MB";
+        }
+
+        if (bytes >= OneKb)
+        {
+            return (bytes / (double)OneKb).ToString("N1", culture) + " KB";
+        }
+
+        return bytes.ToString("N0", culture) + " B";
+    }
+
+    // §15 Q5: fixed names.
+    private static string TypeName(string extension) => extension.ToLowerInvariant() switch
+    {
+        "pdf" => "PDF Document",
+        "xls" or "xlsx" => "Excel Workbook",
+        "doc" or "docx" => "Word Document",
+        "csv" => "CSV File",
+        "txt" => "Text Document",
+        "" => "File",
+        var other => $"{other.ToUpperInvariant()} File"
+    };
+
+    public void Dispose()
+    {
+        disposeCts.Cancel();
+        listCts?.Dispose();
+        disposeCts.Dispose();
+    }
+}

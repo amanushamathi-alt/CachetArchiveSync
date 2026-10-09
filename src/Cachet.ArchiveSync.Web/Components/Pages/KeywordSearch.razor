@@ -1,0 +1,1825 @@
+@page "/"
+@rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "CachetAuthenticated")]
+@implements IAsyncDisposable
+@using Cachet.ArchiveSync.Core.Dtos
+@using Microsoft.Extensions.Options
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Globalization
+
+@* CAS-022 §8.2: InteractiveServer is required here (unlike CAS-021's static-SSR Login.razor) —
+   this screen polls its own submitted task and auto-populates the match panels in place over a
+   live SignalR circuit, with no cookie being issued and no page navigation involved. *@
+
+@* Bug fix (2026-09-23): explicit [Authorize] here, rather than relying on Program.cs's
+   FallbackPolicy, because that FallbackPolicy also applied to ASP.NET Core's own endpoint
+   serving _framework/blazor.web.js (no [AllowAnonymous] of its own), redirecting it to /login
+   for any unauthenticated request and breaking Blazor's client runtime on the login page itself
+   ("Uncaught SyntaxError: Unexpected token '<'" — the script tag received the login page's HTML
+   instead of JS). AuthorizeRouteView (Routes.razor, CAS-021 §8.5) enforces this attribute at the
+   component level only, so it protects this page without touching unrelated endpoints. *@
+
+<PageTitle>Keyword Search</PageTitle>
+
+@* Wireframe layout: toolbar row (search, Bucket, Extension, Search … Task Manager, Quarantine
+   Queue, Audit Log), report row, then the three side-by-side, collapsible panels. *@
+<div class="cachet-page">
+    <div class="cachet-toolbar @(isFilesMode ? "is-files-mode" : null)">
+        @* CAS-039 §2.1/§2.3 (requester's mockup): mode radios directly above the search input, and
+           in Date mode the From/To fields below it. CAS-039 A3: the modes are exclusive — the term
+           input is rendered (and required) only in Keyword mode; Date mode is date-only.
+           CAS-044 §8.1: a third mode, Files (the default), disables every search control. *@
+        <div class="cachet-ks-search-group">
+            <div class="cachet-ks-mode" role="radiogroup" aria-label="Search mode">
+                <label class="cachet-ks-mode-option">
+                    <input id="ks-mode-files"
+                           type="radio"
+                           name="ks-mode"
+                           value="files"
+                           checked="@isFilesMode"
+                           @onchange="SelectFilesMode" />
+                    <span>Files</span>
+                </label>
+                <label class="cachet-ks-mode-option">
+                    <input id="ks-mode-filename"
+                           type="radio"
+                           name="ks-mode"
+                           value="filename"
+                           checked="@isFilenameMode"
+                           @onchange="SelectFilenameMode" />
+                    <span>Filename Search</span>
+                </label>
+                <label class="cachet-ks-mode-option">
+                    <input id="ks-mode-keyword"
+                           type="radio"
+                           name="ks-mode"
+                           value="keyword"
+                           checked="@(!isFilesMode && !isFilenameMode && !isDateMode)"
+                           @onchange="SelectKeywordMode" />
+                    <span>Keyword Search</span>
+                </label>
+                <label class="cachet-ks-mode-option">
+                    <input id="ks-mode-date"
+                           type="radio"
+                           name="ks-mode"
+                           value="date"
+                           checked="@isDateMode"
+                           @onchange="SelectDateMode" />
+                    <span>Date Search</span>
+                </label>
+            </div>
+
+            @* CAS-039 A3 §2.6b: the term input and its V1 hint are not rendered in Date mode.
+               CAS-044 V1: in Files mode the input is shown but disabled. *@
+            @if (!isDateMode)
+            {
+                <div class="cachet-toolbar-search">
+                    <label for="ks-term" class="cachet-visually-hidden">Search term</label>
+                    <input id="ks-term"
+                           class="cachet-input"
+                           type="text"
+                           placeholder="@TermPlaceholder"
+                           disabled="@isFilesMode"
+                           @bind="searchTerm"
+                           @bind:event="oninput" />
+                    @* CAS-048 §2.1/V1: Filename and Keyword need a trimmed term of 3-200 characters. *@
+                    @if (!isFilesMode && !string.IsNullOrEmpty(searchTerm) && !SearchTermValid)
+                    {
+                        <span class="cachet-input-hint">@(searchTerm.Trim().Length < MinTermLength ? TermTooShortHint : TermTooLongHint)</span>
+                    }
+                </div>
+            }
+
+            @* CAS-039 §2.2: the date controls are not rendered at all in Keyword mode. *@
+            @if (isDateMode)
+            {
+                <div class="cachet-ks-date-row">
+                    <div class="cachet-ks-date-field">
+                        <label for="ks-from-date" class="cachet-toolbar-label">From date</label>
+                        @* CAS-039 §2.3 A1: text input + calendar button; the hidden native date input
+                           is what the browser's picker opens on and reports back through. *@
+                        <div class="cachet-ks-date-input-wrap">
+                            <input id="ks-from-date"
+                                   class="cachet-input cachet-ks-date-input"
+                                   type="text"
+                                   placeholder="@DateFormat"
+                                   inputmode="numeric"
+                                   @bind="fromDateText"
+                                   @bind:event="oninput" />
+                            <button type="button"
+                                    id="ks-from-date-picker-btn"
+                                    class="cachet-ks-date-picker-btn"
+                                    aria-label="Choose From date"
+                                    data-cachet-date-picker-for="ks-from-date-native">
+                                @CalendarIcon
+                            </button>
+                            <input id="ks-from-date-native"
+                                   class="cachet-ks-date-native"
+                                   type="date"
+                                   tabindex="-1"
+                                   aria-hidden="true"
+                                   max="@TodayIso"
+                                   value="@ToNativeValue(fromDateText)"
+                                   @onchange="OnFromPicked" />
+                        </div>
+                    </div>
+                    <div class="cachet-ks-date-field">
+                        <label for="ks-to-date" class="cachet-toolbar-label">To date</label>
+                        <div class="cachet-ks-date-input-wrap">
+                            <input id="ks-to-date"
+                                   class="cachet-input cachet-ks-date-input"
+                                   type="text"
+                                   placeholder="@DateFormat"
+                                   inputmode="numeric"
+                                   @bind="toDateText"
+                                   @bind:event="oninput" />
+                            <button type="button"
+                                    id="ks-to-date-picker-btn"
+                                    class="cachet-ks-date-picker-btn"
+                                    aria-label="Choose To date"
+                                    data-cachet-date-picker-for="ks-to-date-native">
+                                @CalendarIcon
+                            </button>
+                            <input id="ks-to-date-native"
+                                   class="cachet-ks-date-native"
+                                   type="date"
+                                   tabindex="-1"
+                                   aria-hidden="true"
+                                   max="@TodayIso"
+                                   value="@ToNativeValue(toDateText)"
+                                   @onchange="OnToPicked" />
+                        </div>
+                    </div>
+                </div>
+
+                @* CAS-039 §2.5/§9: one inline hint per failing rule (V7 has no copy of its own).
+                   CAS-039 A4: grouped in an out-of-flow wrapper (like app.css's V1 hint) so a hint
+                   appearing never lifts the date inputs off the toolbar's shared bottom line. *@
+                <div class="cachet-ks-date-hints">
+                    @if (DateFormatHintVisible)
+                    {
+                        <span class="cachet-ks-date-hint cachet-ks-date-hint-format">@DateFormatHint</span>
+                    }
+                    @if (DateOrderHintVisible)
+                    {
+                        <span class="cachet-ks-date-hint cachet-ks-date-hint-order">@DateOrderHint</span>
+                    }
+                    @if (DateFutureHintVisible)
+                    {
+                        <span class="cachet-ks-date-hint cachet-ks-date-hint-future">@DateFutureHint</span>
+                    }
+                    @* CAS-039 A2 §9 V10: date-only range limit (CAS-039 A3: always applies in Date mode). *@
+                    @if (DateOnlyRangeHintVisible)
+                    {
+                        <span class="cachet-ks-date-hint cachet-ks-date-hint-range">@DateOnlyRangeHint</span>
+                    }
+                </div>
+            }
+        </div>
+
+        @* CAS-039 A4: each inline label + select pair is one bottom-aligned toolbar item, with the
+           label vertically centred on its select. *@
+        <div class="cachet-ks-inline-field">
+            <label for="ks-bucket" class="cachet-toolbar-label">Bucket</label>
+            <select id="ks-bucket" class="cachet-select" disabled>
+                <option>@(bucketName ?? "(bucket not configured)")</option>
+            </select>
+        </div>
+
+        <div class="cachet-ks-inline-field">
+            <label for="ks-extension" class="cachet-toolbar-label">Extension</label>
+            <select id="ks-extension" class="cachet-select" disabled="@isFilesMode" @bind="selectedExtension">
+                @foreach (var extension in ExtensionOptions)
+                {
+                    <option value="@extension">@extension</option>
+                }
+            </select>
+        </div>
+
+        <button type="button"
+                class="cachet-btn-primary cachet-ks-search-btn"
+                disabled="@(!CanSearch)"
+                @onclick="HandleSearchAsync">
+            Search
+        </button>
+
+        <span class="cachet-toolbar-spacer"></span>
+
+        @* CAS-030 §8.1: Task Manager button + live badge, immediately left of Quarantine Queue. *@
+        <TaskManagerBadge />
+
+        @* CAS-024 §3/§8.1: live Quarantine Queue trigger; badge count reuses quarantineItems, already
+           loaded for the embedded Quarantine panel below. *@
+        @if (hasFullAccess)
+        {
+            <button type="button"
+                    class="cachet-btn cachet-btn-square cachet-ks-quarantine-trigger-btn"
+                    @onclick="OpenQuarantineQueueModal">
+                Quarantine Queue <span class="cachet-btn-count cachet-btn-count-amber">@quarantineTotalCount</span>
+            </button>
+        }
+
+        @* CAS-031 §3: live Audit Log trigger (replaces CAS-025 §0's disabled placeholder); no count
+           badge (CAS-031 §0 point 3). *@
+        <button type="button"
+                class="cachet-btn cachet-btn-square cachet-al-trigger-btn"
+                @onclick="OpenAuditLogModal">
+            Audit Log
+        </button>
+    </div>
+
+    @* Pre-/Post-Action Report buttons hidden by request. To restore, re-add inside a .cachet-actionbar div:
+       <button type="button" class="cachet-btn" @onclick="@(() => OpenReportModal(ReportKind.PreAction))">Pre-Action Report</button>
+       <button type="button" class="cachet-btn" @onclick="@(() => OpenReportModal(ReportKind.PostAction))">Post-Action Report</button> *@
+
+    <QuarantineQueueModal @ref="quarantineModal" OnDeleteCompleted="LoadQuarantineAsync" OnClosed="LoadQuarantineAsync" />
+    <ReportModal @ref="reportModal" ActiveTabLabel="Keyword Search" />
+    <AuditLogModal @ref="auditLogModal" />
+
+    @* CAS-040 §8.2/§8.3: File Viewer for the Filename/Content Matches names (context KeywordSearch)
+       and the quarantine panel's names (context Quarantine). *@
+    <FileViewerModal FileIndexId="viewerFileIndexId" Context="@viewerContext" OnClose="CloseFileViewerAsync" />
+
+    <div class="cachet-banners">
+        @if (toastMessage is not null)
+        {
+            <div class="cachet-banner cachet-banner-toast cachet-ks-toast">@toastMessage</div>
+        }
+
+        @* CAS-030 §7 V7: unknown, non-integer, or wrong-type ?taskId= — filter bar stays usable. *@
+        @if (taskNotice is not null)
+        {
+            <div class="cachet-banner cachet-banner-notice cachet-ks-notice">@taskNotice</div>
+        }
+
+        @* CAS-030 §7 V9: a 401 stopped a poll/reload call. *@
+        @if (sessionExpired)
+        {
+            <div class="cachet-banner cachet-banner-error cachet-ks-error-banner">
+                @SessionExpiredMessage <a href="login">Sign in</a>
+            </div>
+        }
+
+        @* A running Keyword search always shows its elapsed-time/progress/estimate banner, in any mode.
+           Filename/Date searches get a generic one; Files mode browsing needs no banner. *@
+        @if (isSearchInFlight)
+        {
+            if (CanCancelSearch)
+            {
+                @* CAS-057 §2.1-§2.3: Keyword-mode bar with a right-aligned Cancel search button (same inline
+                   flex layout as the Failed banner), an inline two-step confirm, and a button-less
+                   Cancelling state. *@
+                <div class="cachet-banner cachet-banner-progress cachet-ks-progress-banner" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+                    <span>@ProgressBannerText</span>
+                    @if (showCancelConfirm)
+                    {
+                        <span class="cachet-ks-cancel-confirm" style="display:inline-flex;align-items:center;gap:8px;">
+                            <span>Stop this search? Matches found so far are kept.</span>
+                            <button type="button" class="cachet-btn cachet-ks-cancel-stop" @onclick="CancelSearchAsync">Stop search</button>
+                            <button type="button" class="cachet-btn cachet-ks-cancel-keep" @onclick="KeepSearchRunning">Keep running</button>
+                        </span>
+                    }
+                    else if (!isCancelRequested)
+                    {
+                        <button type="button" class="cachet-btn cachet-ks-cancel-btn" aria-label="Cancel search" @onclick="ShowCancelConfirm">Cancel search</button>
+                    }
+                </div>
+            }
+            else if (!isFilesMode || string.Equals(resultsMode, KeywordMode, StringComparison.Ordinal))
+            {
+                <div class="cachet-banner cachet-banner-progress cachet-ks-progress-banner">@ProgressBannerText</div>
+            }
+        }
+        else if (taskState == "Failed")
+        {
+            <div class="cachet-banner cachet-banner-error cachet-ks-error-banner" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+                <span>This search did not complete successfully.@(failureDetail is not null ? $" {failureDetail}" : null)</span>
+                <button type="button" class="cachet-btn cachet-ks-error-dismiss" aria-label="Dismiss" title="Dismiss" @onclick="DismissFailureAsync">✕</button>
+            </div>
+        }
+
+        @if (searchErrorBanner is not null)
+        {
+            <div class="cachet-banner cachet-banner-error cachet-ks-error-banner">@searchErrorBanner</div>
+        }
+
+        @* CAS-030 §8.2 point 3: a reloaded or deep-linked task's results always say which search they belong to.
+           CAS-039 A4: reads only reloadedSearchParameters, never the (reset) filter-bar fields. *@
+        @* CAS-057 §2.4: a Cancelled task with at least one match gets the same header, worded "partial results". *@
+        @if (reloadedSearchParameters is not null && !isSearchInFlight && !sessionExpired
+            && (taskState == "Completed" || (taskState == "Cancelled" && totalMatches > 0)))
+        {
+            var resultsWord = taskState == "Cancelled" ? "partial results" : "results";
+            <p class="cachet-context-header cachet-ks-context-header">
+                @* CAS-039 A2 §2.6a: a date-only task (blank term, both dates) reads "all files". *@
+                @if (string.IsNullOrEmpty(reloadedSearchParameters.Term) && ReloadedDateRangeSuffix is not null)
+                {
+                    @:Showing @resultsWord for all files (@reloadedSearchParameters.Extension)@ReloadedDateRangeSuffix, submitted @FormatRelativeTime(reloadedSubmittedAtUtc) ago.
+                }
+                else
+                {
+                    @:Showing @resultsWord for "@reloadedSearchParameters.Term" (@reloadedSearchParameters.Extension)@ReloadedDateRangeSuffix, submitted @FormatRelativeTime(reloadedSubmittedAtUtc) ago.
+                }
+            </p>
+        }
+    </div>
+
+    @* CAS-044 §8.2 / CAS-048 §2.2: Files mode (default) shows the Files explorer. Every other mode shows
+       the same explorer over that mode's search results (the Filename/Content Matches panels are gone),
+       above the unchanged read-only Quarantine panel. Results belong to the mode that produced them. *@
+    @if (isFilesMode)
+    {
+        <FileExplorer @ref="fileExplorer" OnFileOpened="OpenBrowserFileViewer" OnQuarantineChanged="LoadQuarantineAsync" />
+    }
+    else
+    {
+    @* Results explorer on the left, Quarantine panel on the right (side by side; stacks on narrow screens). *@
+    <div class="cachet-ks-results-layout">
+    <div class="cachet-ks-results-host">
+        @if (ShowResultsExplorer)
+        {
+            @* CAS-051 §2.8: results-mode quarantine writes require Full Access (CAS-050 §2.8). *@
+            @if (hasFullAccess)
+            {
+                <div class="cachet-ks-results-actions">
+                    <button type="button"
+                            id="ks-send-to-quarantine"
+                            class="cachet-btn-bulk"
+                            disabled="@(selectedResultIds.Count == 0)"
+                            @onclick="SendToQuarantineAsync">
+                        Send to Quarantine (@selectedResultIds.Count)
+                    </button>
+                </div>
+            }
+            <FileExplorer @key="activeTaskId"
+                          @ref="fileExplorer"
+                          ResultsTaskId="activeTaskId"
+                          Selectable="@hasFullAccess"
+                          SelectedIds="selectedResultIds"
+                          OnSelectionChanged="OnResultSelectionChanged"
+                          OnFileOpened="OpenResultFileViewer"
+                          ResultsEmptyMessage="@ResultsEmptyMessage"
+                          TotalMatches="totalMatches" />
+        }
+        else
+        {
+            <p class="cachet-panel-empty cachet-ks-results-prompt">@ResultsPlaceholder</p>
+        }
+    </div>
+
+    @* Quarantine is a Full Access feature and is shown only alongside displayed results. *@
+    @if (hasFullAccess && ShowResultsExplorer)
+    {
+    <div class="cachet-panels cachet-ks-quarantine-row">
+        @* CAS-022 §8.5: read-only embedded view — the permanent-delete action lives in the Quarantine
+           Queue modal (UI/UX Spec §3), so this panel has no row checkboxes or bulk actions. Quarantine
+           is Keyword Search-only (BRD §12.1), hence the fixed Source Tab value. *@
+        <section class="cachet-panel cachet-ks-panel cachet-ks-quarantine-panel @(collapsedPanels.Contains(QuarantinePanel) ? "is-collapsed" : null)">
+            <div class="cachet-panel-header">
+                <div class="cachet-panel-heading">
+                    <button type="button" class="cachet-panel-toggle" aria-label="Collapse or expand Quarantine" @onclick="() => ToggleCollapsed(QuarantinePanel)">@CollapseIcon(QuarantinePanel)</button>
+                    <h2>Quarantine<span class="cachet-panel-count">@quarantineTotalCount</span></h2>
+                </div>
+            </div>
+
+            <div class="cachet-panel-body">
+                @if (quarantineErrorBanner is not null)
+                {
+                    <div class="cachet-banners"><div class="cachet-banner cachet-banner-error cachet-ks-error-banner">@quarantineErrorBanner</div></div>
+                }
+                else if (quarantineItems.Count == 0)
+                {
+                    <p class="cachet-panel-empty">
+                        Quarantine is empty. Files sent to quarantine from Keyword Search or the Files browser
+                        appear here for final review before permanent deletion.
+                    </p>
+                }
+                else
+                {
+                    <table class="cachet-grid-table">
+                        <thead>
+                            <tr>
+                                <th>Name / Path</th>
+                                <th class="cachet-col-a">Source Tab</th>
+                                <th class="cachet-col-b">Quarantined On</th>
+                                <th class="cachet-col-status">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in quarantineItems)
+                            {
+                                <tr>
+                                    <td>
+                                        <button type="button" class="cachet-cell-name cachet-file-link" title="Open @item.Name" @ref="fileLinkRefs[FileLinkKey(QuarantinePanel, item.FileId)]" @onclick="@(() => OpenFileViewer(item.FileIndexId, QuarantineContext, FileLinkKey(QuarantinePanel, item.FileId)))">@item.Name</button>
+                                        <span class="cachet-cell-path" title="@item.Path">@item.Path</span>
+                                    </td>
+                                    <td class="cachet-ks-quarantine-source-tab">@item.SourceTab</td>
+                                    <td>@item.QuarantinedOn</td>
+                                    <td><span class="@ChipClass(item.Status)">@item.Status</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+
+                @* CAS-052 §2.2: panel paging, independent of the modal's own page state. *@
+                @if (quarantineErrorBanner is null)
+                {
+                    <QuarantinePager Page="quarantinePage"
+                                     PageSize="quarantinePageSize"
+                                     TotalCount="quarantineTotalCount"
+                                     IsLoading="quarantineLoading"
+                                     TestIdPrefix="ks-quarantine"
+                                     OnPageChanged="GoToQuarantinePageAsync"
+                                     OnPageSizeChanged="ChangeQuarantinePageSizeAsync" />
+                }
+            </div>
+        </section>
+    </div>
+    }
+    </div>
+    }
+</div>
+
+@code {
+    // CAS-022 §8.1/FR-04: fixed superset per the BRD, not the original wireframe's shorter list.
+    private static readonly string[] ExtensionOptions = { "All", "PDF", "DOC", "DOCX", "XLS", "XLSX", "TXT" };
+
+    private const string GenericErrorMessage = "Something went wrong. Please try again.";
+
+    // CAS-030 §7 V7/V9, §8.2.
+    private const string ScreenName = "KeywordSearch";
+    private const string TaskTypeName = "KeywordSearch";
+    private const string TaskNotFoundNotice = "That task could not be found.";
+    private const string SessionExpiredMessage = "Your session has expired — sign in again to see results.";
+
+    // CAS-039 §2.3/§9 V6–V9: display/parse format (InvariantCulture) and inline hint copy.
+    private const string DateFormat = "MM/dd/yyyy";
+    private const string DateFormatHint = "Enter a date as MM/dd/yyyy.";
+    private const string DateOrderHint = "From date must be on or before To date.";
+    private const string DateFutureHint = "Dates cannot be in the future.";
+
+    // CAS-039 A2 §2.6a/§9 V10: date-only search — max inclusive range and hint. CAS-039 A3: the term
+    // input exists only in Keyword mode, so only the original placeholder remains.
+    private const int MaxDateOnlyRangeDays = 31;
+    private const string DateOnlyRangeHint = "Without a keyword, the date range can be at most 31 days.";
+    private const string FilesModeTermPlaceholder = "Global search - filename or path…";
+
+    // CAS-048 §2.1/V1: per-mode term rules and copy (placeholders per §14 Q2's proposed text).
+    private const int MinTermLength = 3;
+    private const int MaxTermLength = 200;
+    private const string FilenameModeTermPlaceholder = "Filename contains (min 3 characters)…";
+    private const string KeywordModeTermPlaceholder = "Text to find inside files…";
+    private const string TermTooShortHint = "Enter at least 3 characters";
+    private const string TermTooLongHint = "Search term must be at most 200 characters.";
+    private const string ResultsPromptText = "Enter a search…";
+    private const string NoFilesMatchedText = "No files matched.";
+    private const string NoFilesInDateRangeText = "No files in that date range.";
+
+    // CAS-048 §2.2: the Api's mode values (CAS-047 §2).
+    private const string FilenameMode = "Filename";
+    private const string KeywordMode = "Keyword";
+    private const string DateMode = "Date";
+
+    [Inject] private IHttpClientFactory HttpClientFactory { get; set; } = default!;
+    [Inject] private IConfiguration Configuration { get; set; } = default!;
+    [Inject] private ILogger<KeywordSearch> Logger { get; set; } = default!;
+    [Inject] private IOptions<TaskPollingOptions> PollingOptions { get; set; } = default!;
+
+    // CAS-030 §8.2 deep link. Bound as a string (the spec shows int?) so that a non-integer value
+    // reaches V7's "not found" notice instead of failing Blazor's query-string binding.
+    [SupplyParameterFromQuery(Name = "taskId")]
+    public string? TaskId { get; set; }
+
+    // CAS-030 §8.2/§8.5/V7/V9 state.
+    private string? taskNotice;
+    private bool sessionExpired;
+    private string? failureDetail;
+    private TaskSearchParameters? reloadedSearchParameters;
+    private DateTimeOffset? reloadedSubmittedAtUtc;
+    // §8.5: set only for a task resolved through GET /tasks[/{taskId}] with isAcknowledged=false;
+    // cleared once the acknowledge is sent, so it is sent at most once per component instance.
+    private int? ackEligibleTaskId;
+
+    // CAS-022 §8.1: read-only, single-value dropdown (BLOCKED note, see implementer report — no
+    // §6 endpoint and no §9 config key exist to source this value; read directly from Web's own
+    // IConfiguration under the same "B2:BucketName" key Api uses, which requires that key to also
+    // be supplied to the Web process at deploy time; not registered here since no code change to
+    // configuration loading is needed for that to work once/if the env var is present for Web too).
+    private string? bucketName;
+
+    private string searchTerm = string.Empty;
+    private string selectedExtension = "All";
+
+    private bool isSearchInFlight;
+    private int? activeTaskId;
+    private DateTimeOffset? submittedAtUtc;
+
+    // CAS-029 measured progress for the running task (from GET /tasks/{id}); null until the Worker reports.
+    private int? progressProcessed;
+    private int? progressTotal;
+    private DateTimeOffset? progressStartedAtUtc;
+
+    // The remaining-time estimate is shown only once the sample is large enough to be realistic.
+    private const double EtaMinFractionDone = 0.05;
+    private static readonly TimeSpan EtaMinElapsed = TimeSpan.FromMinutes(2);
+
+    private int pollCount;
+    private PeriodicTimer? pollTimer;
+    private CancellationTokenSource? pollCts;
+
+    // None | InProgress | Completed | Failed | Cancelled
+    private string taskState = "None";
+
+    // CAS-057 §2.2/§2.3: inline cancel confirm is open / the cancel POST was accepted (or is in flight) and
+    // the page is waiting for the task to reach a terminal state. The 2 s cancelling poll is a local
+    // constant, not a config key (§6).
+    private bool showCancelConfirm;
+    private bool isCancelRequested;
+    private static readonly TimeSpan CancellingPollInterval = TimeSpan.FromSeconds(2);
+    private const string CancellingBannerText = "Cancelling search — stopping and gathering the matches found so far…";
+
+    // CAS-048 §2.2: the mode ("Filename" | "Keyword" | "Date") that produced the current task's results.
+    // The explorer shows only while the selected mode equals it, so no stale rows appear in another mode.
+    private string? resultsMode;
+
+    // CAS-048 §2.2: "M matches in total" (from GET /search/{id}/results totals); null = omitted.
+    private int? totalMatches;
+
+    // CAS-048 §2.2: selected searchResultIds (from browse / result-ids responses only, V6). Persists while
+    // navigating folders; cleared after a send, a new search, a task reload or a mode switch.
+    private readonly HashSet<int> selectedResultIds = new();
+
+    // The TaskId query value the page last reloaded for (CAS-048 §2.4); a change re-runs the reload.
+    private string? loadedTaskIdParameter;
+
+    private IReadOnlyList<QuarantineListItem> quarantineItems = Array.Empty<QuarantineListItem>();
+
+    private string? toastMessage;
+    private string? searchErrorBanner;
+    private string? quarantineErrorBanner;
+    // CAS-052 §2.2: panel paging state (default 25, own state — independent of the modal).
+    private int quarantinePage = 1;
+    private int quarantinePageSize = 25;
+    private int quarantineTotalCount;
+    private bool quarantineLoading;
+
+    // CAS-024 §3/§8.1: opened via @ref from this page's own trigger button.
+    private QuarantineQueueModal? quarantineModal;
+
+    // CAS-032 §8.1: opened via @ref from this page's report buttons.
+    private ReportModal? reportModal;
+
+    // CAS-031 §3: opened via @ref from this page's Audit Log button.
+    private AuditLogModal? auditLogModal;
+
+    // CAS-040 §8.2/§8.4: File Viewer state. The modal is open while viewerFileIndexId is not null;
+    // focus returns to the clicked name button (tracked by panel + row key) on close.
+    private const string KeywordSearchContext = "KeywordSearch";
+    private const string QuarantineContext = "Quarantine";
+    private int? viewerFileIndexId;
+    private string viewerContext = KeywordSearchContext;
+    private string? viewerReturnFocusKey;
+    // CAS-048: true when the viewer was opened from the explorer (Files or results), so focus returns to its row.
+    private bool viewerFromExplorer;
+    private readonly Dictionary<string, ElementReference> fileLinkRefs = new();
+
+    // Wireframe panel collapse (▾/▸) — display state only, per circuit.
+    private const string QuarantinePanel = "quarantine";
+    private readonly HashSet<string> collapsedPanels = new();
+
+    // CAS-048 V1: Filename and Keyword need a trimmed term of 3-200 characters (Date has no term).
+    private bool SearchTermValid =>
+        searchTerm.Trim().Length is >= MinTermLength and <= MaxTermLength;
+
+    // CAS-044 §8.1 / CAS-048 §2.1: Files is the mode on every plain load. Files, Filename, Keyword and
+    // Date are exclusive: isFilesMode, else isFilenameMode, else isDateMode, else Keyword.
+    private bool isFilesMode = true;
+    private bool isFilenameMode;
+    private bool isDateMode;
+    private FileExplorer? fileExplorer;
+
+    // The Api mode of the selected radio; only meaningful outside Files mode (V3).
+    private string CurrentMode => isFilenameMode ? FilenameMode : isDateMode ? DateMode : KeywordMode;
+
+    private string TermPlaceholder => isFilesMode ? FilesModeTermPlaceholder
+        : isFilenameMode ? FilenameModeTermPlaceholder
+        : KeywordModeTermPlaceholder;
+
+    private bool ShowResultsExplorer =>
+        !isFilesMode && !sessionExpired && activeTaskId is not null
+        // CAS-057 §2.4/§2.5: a Cancelled task shows its partial results only when it has at least one match.
+        && (taskState == "Completed" || (taskState == "Cancelled" && totalMatches > 0))
+        && string.Equals(resultsMode, CurrentMode, StringComparison.Ordinal);
+
+    // CAS-057 §2.1: Keyword-mode search in flight with a known task; never in Files mode.
+    private bool CanCancelSearch =>
+        isSearchInFlight && !isFilesMode && activeTaskId is not null
+        && string.Equals(resultsMode, KeywordMode, StringComparison.Ordinal);
+
+    private string ResultsEmptyMessage => resultsMode == DateMode ? NoFilesInDateRangeText : NoFilesMatchedText;
+
+    // CAS-057 §2.5: a Cancelled task without matches leaves the results area as it was before the search.
+    private string ResultsPlaceholder =>
+        !string.Equals(resultsMode, CurrentMode, StringComparison.Ordinal) || taskState is "None" or "Cancelled" ? ResultsPromptText
+        : isSearchInFlight ? "Waiting for results…"
+        : "No results to show.";
+    private string fromDateText = string.Empty;
+    private string toDateText = string.Empty;
+
+    private static DateOnly TodayUtc => DateOnly.FromDateTime(DateTime.UtcNow);
+
+    private static bool TryParseDate(string value, out DateOnly date) =>
+        DateOnly.TryParseExact(value, DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+
+    // CAS-039 §9 V6: a non-empty field that does not parse exactly as MM/dd/yyyy.
+    private bool DateFormatHintVisible =>
+        (fromDateText.Length > 0 && !TryParseDate(fromDateText, out _))
+        || (toDateText.Length > 0 && !TryParseDate(toDateText, out _));
+
+    // CAS-039 §9 V8: only evaluable once both dates parse.
+    private bool DateOrderHintVisible =>
+        TryParseDate(fromDateText, out var from) && TryParseDate(toDateText, out var to) && from > to;
+
+    // CAS-039 §9 V9: either parsed date after today (UTC).
+    private bool DateFutureHintVisible =>
+        (TryParseDate(fromDateText, out var from) && from > TodayUtc)
+        || (TryParseDate(toDateText, out var to) && to > TodayUtc);
+
+    // CAS-039 §2.5/§9 V6–V9 (V7: both required): always satisfied in Keyword mode.
+    private bool DateRangeValid =>
+        !isDateMode
+        || (TryParseDate(fromDateText, out var from)
+            && TryParseDate(toDateText, out var to)
+            && from <= to
+            && to <= TodayUtc);
+
+    // CAS-039 A2 §9 V10: Date mode, blank term, both dates parse, inclusive range over the limit.
+    // CAS-039 A3: the term is always empty in Date mode, so V10 always applies there.
+    private bool DateOnlyRangeHintVisible =>
+        isDateMode
+        && string.IsNullOrWhiteSpace(searchTerm)
+        && TryParseDate(fromDateText, out var from)
+        && TryParseDate(toDateText, out var to)
+        && to.DayNumber - from.DayNumber + 1 > MaxDateOnlyRangeDays;
+
+    // CAS-039 A3 §2.6b/§9 V1: Keyword mode requires a valid term; Date mode has no term (always
+    // empty, date-only search).
+    private bool TermConditionMet => isDateMode || SearchTermValid;
+
+    // CAS-039 §2.5: the existing Search conditions AND (Keyword mode OR V6–V9 satisfied);
+    // CAS-039 A2/A3: term condition per mode, AND V10.
+    private bool CanSearch =>
+        !isFilesMode && TermConditionMet && !isSearchInFlight && !string.IsNullOrWhiteSpace(bucketName) && DateRangeValid
+        && !DateOnlyRangeHintVisible;
+
+    // CAS-039 §2.6: context-header suffix for a reloaded task that carries a date range; null (so
+    // the header is unchanged) otherwise.
+    private string? ReloadedDateRangeSuffix =>
+        reloadedSearchParameters is { FromDate: { } from, ToDate: { } to }
+            ? $", created {from.ToString(DateFormat, CultureInfo.InvariantCulture)} – {to.ToString(DateFormat, CultureInfo.InvariantCulture)}"
+            : null;
+
+    private void SelectFilesMode()
+    {
+        // CAS-044 V3: the dates are not shown in Files mode, so clear them (a hidden stale date is
+        // never sent, CAS-039 SC-5); a typed keyword is kept for when Keyword mode is picked again.
+        isFilesMode = true;
+        isFilenameMode = false;
+        isDateMode = false;
+        fromDateText = string.Empty;
+        toDateText = string.Empty;
+        selectedResultIds.Clear();
+    }
+
+    private void SelectFilenameMode()
+    {
+        // CAS-048 V3: Filename never posts dates, so clear them like Keyword mode does.
+        isFilesMode = false;
+        isFilenameMode = true;
+        isDateMode = false;
+        fromDateText = string.Empty;
+        toDateText = string.Empty;
+        selectedResultIds.Clear();
+    }
+
+    private void SelectKeywordMode()
+    {
+        // CAS-039 §2.4: clear both fields (and so their hints) so a hidden stale date is never sent.
+        isFilesMode = false;
+        isFilenameMode = false;
+        isDateMode = false;
+        fromDateText = string.Empty;
+        toDateText = string.Empty;
+        selectedResultIds.Clear();
+    }
+
+    private void SelectDateMode()
+    {
+        // CAS-039 A3 §2.6b: Date mode is date-only — clear the keyword (its input is not rendered),
+        // so switching back to Keyword mode also shows an empty term.
+        isFilesMode = false;
+        isFilenameMode = false;
+        isDateMode = true;
+        searchTerm = string.Empty;
+        selectedResultIds.Clear();
+    }
+
+    // CAS-048 §2.4: a deep link selects the mode of the task it opens.
+    private void SelectModeFor(string mode)
+    {
+        switch (mode)
+        {
+            case FilenameMode:
+                SelectFilenameMode();
+                break;
+            case DateMode:
+                SelectDateMode();
+                break;
+            default:
+                SelectKeywordMode();
+                break;
+        }
+    }
+
+    // CAS-039 §2.3 A1: calendar picker. The native input's value is always ISO yyyy-MM-dd whatever
+    // the browser locale; the text field always shows MM/dd/yyyy (InvariantCulture).
+    // Opening the picker is browser-side only (js/datepicker.js delegated click listener on the
+    // buttons' data-cachet-date-picker-for), so no SignalR round trip can expire showPicker()'s
+    // user-activation requirement.
+    private const string NativeDateFormat = "yyyy-MM-dd";
+
+    // CAS-039 §2.3 A1: the picker's max is today (UTC).
+    private static string TodayIso => TodayUtc.ToString(NativeDateFormat, CultureInfo.InvariantCulture);
+
+    // CAS-039 §2.3 A1: the picker opens on the field's current value, if valid.
+    private static string ToNativeValue(string text) =>
+        TryParseDate(text, out var date) ? date.ToString(NativeDateFormat, CultureInfo.InvariantCulture) : string.Empty;
+
+    private static readonly RenderFragment CalendarIcon = @<svg class="cachet-ks-date-picker-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>;
+
+    // CAS-039 §2.3 A1: a picked ISO date is written into the same field the text input binds to,
+    // so V6–V9 and CanSearch recompute exactly as for a typed value. Empty/unparseable: no change.
+    private void OnFromPicked(ChangeEventArgs e)
+    {
+        if (TryParsePicked(e, out var text))
+        {
+            fromDateText = text;
+        }
+    }
+
+    private void OnToPicked(ChangeEventArgs e)
+    {
+        if (TryParsePicked(e, out var text))
+        {
+            toDateText = text;
+        }
+    }
+
+    private static bool TryParsePicked(ChangeEventArgs e, out string text)
+    {
+        if (e.Value is string value
+            && DateOnly.TryParseExact(value, NativeDateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+        {
+            text = date.ToString(DateFormat, CultureInfo.InvariantCulture);
+            return true;
+        }
+
+        text = string.Empty;
+        return false;
+    }
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
+    // CAS-051 §2.8: same b2_capability claim mechanism as QuarantineQueueModal.
+    private bool hasFullAccess;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthenticationStateTask is not null)
+        {
+            var authState = await AuthenticationStateTask;
+            hasFullAccess = string.Equals(
+                authState.User.FindFirst("b2_capability")?.Value, "Full Access", StringComparison.Ordinal);
+        }
+
+        bucketName = Configuration["B2:BucketName"];
+        await LoadQuarantineAsync();
+        // CAS-030 §8.2 supersedes CAS-027's deep-link polling: ReloadTaskAsync handles ?taskId=.
+        loadedTaskIdParameter = TaskId;
+        await ReloadTaskAsync();
+    }
+
+    // CAS-048 §2.4: ReloadTaskAsync also runs when ?taskId= changes while the page is open (a Task Manager
+    // click while already on "/"). Any running poll is cancelled and the previous task state cleared first.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.Equals(TaskId, loadedTaskIdParameter, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        loadedTaskIdParameter = TaskId;
+        ResetTaskState();
+        await ReloadTaskAsync();
+    }
+
+    private void ResetTaskState()
+    {
+        pollCts?.Cancel();
+        pollTimer?.Dispose();
+        isSearchInFlight = false;
+        activeTaskId = null;
+        submittedAtUtc = null;
+        taskState = "None";
+        resultsMode = null;
+        totalMatches = null;
+        selectedResultIds.Clear();
+        taskNotice = null;
+        failureDetail = null;
+        searchErrorBanner = null;
+        reloadedSearchParameters = null;
+        reloadedSubmittedAtUtc = null;
+        ackEligibleTaskId = null;
+        showCancelConfirm = false;
+        isCancelRequested = false;
+    }
+
+    // CAS-030 §8.5: acknowledge only after the finished state has actually been rendered.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (ackEligibleTaskId is { } taskId
+            && activeTaskId == taskId
+            && !isSearchInFlight
+            && taskState is "Completed" or "Failed")
+        {
+            ackEligibleTaskId = null;
+            await AcknowledgeAsync(taskId);
+        }
+    }
+
+    // CAS-030 §8.2 (FR-21): reload the user's latest KeywordSearch task, or the ?taskId= one.
+    // Reads stored state only — never POST /search, never a new task, never B2 (SC-7).
+    private async Task ReloadTaskAsync()
+    {
+        var client = HttpClientFactory.CreateClient("CachetApi");
+        var isDeepLink = TaskId is not null;
+        int taskId;
+
+        if (isDeepLink)
+        {
+            if (!int.TryParse(TaskId, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out taskId)
+                || taskId <= 0)
+            {
+                taskNotice = TaskNotFoundNotice;
+                return;
+            }
+        }
+        else
+        {
+            using var listResponse = await TryGetAsync(client, $"tasks?type={TaskTypeName}&page=1&pageSize=1", "GET /tasks");
+            if (listResponse is null || !listResponse.IsSuccessStatusCode)
+            {
+                return;
+            }
+
+            var list = await listResponse.Content.ReadFromJsonAsync<PagedResult<TaskListItem>>();
+            if (list is null || list.Items.Count == 0)
+            {
+                return;
+            }
+
+            taskId = list.Items[0].TaskId;
+        }
+
+        using var detailResponse = await TryGetAsync(client, $"tasks/{taskId}", "GET /tasks/{taskId}");
+        if (detailResponse is null)
+        {
+            return;
+        }
+
+        TaskDetailResponse? task = null;
+        if (detailResponse.IsSuccessStatusCode)
+        {
+            task = await detailResponse.Content.ReadFromJsonAsync<TaskDetailResponse>();
+        }
+        else if (detailResponse.StatusCode != System.Net.HttpStatusCode.NotFound)
+        {
+            Logger.LogWarning("{Component}: unexpected {StatusCode} from {Endpoint}", ScreenName, (int)detailResponse.StatusCode, "GET /tasks/{taskId}");
+            return;
+        }
+
+        if (task is null || !string.Equals(task.Type, TaskTypeName, StringComparison.Ordinal))
+        {
+            if (isDeepLink)
+            {
+                taskNotice = TaskNotFoundNotice;
+            }
+
+            return;
+        }
+
+        Logger.LogInformation("{Screen}: reloaded task {TaskId} with status {Status}", ScreenName, task.TaskId, task.Status);
+
+        switch (task.Status)
+        {
+            case "Queued":
+            case "Running":
+                ApplyReloadedContext(task, isDeepLink);
+                PrefillFilterFromRunningTask(task.SearchParameters);
+                activeTaskId = task.TaskId;
+                submittedAtUtc = task.SubmittedAt;
+                isSearchInFlight = true;
+                taskState = "InProgress";
+                pollCount = 0;
+                _ = PollTaskAsync(task.TaskId);
+                break;
+
+            case "Completed":
+                ApplyReloadedContext(task, isDeepLink);
+                await LoadCompletedResultsAsync(client, task.TaskId);
+                break;
+
+            case "Failed":
+                // A failure the user already dismissed (acknowledged) is not shown again on a plain open.
+                if (!isDeepLink && task.IsAcknowledged)
+                {
+                    break;
+                }
+
+                ApplyReloadedContext(task, isDeepLink);
+                activeTaskId = task.TaskId;
+                taskState = "Failed";
+                failureDetail = task.ResultDetail;
+                break;
+
+            case "Cancelled":
+            {
+                // CAS-057 §2.8: with matches -> partial results + notice; none -> unchanged empty state on a
+                // plain open, the notice alone on a deep link. A Cancelled task is never acknowledged (§2.9).
+                var cancelled = await GetCancelledResultAsync(client, task.TaskId);
+                if (cancelled is null || sessionExpired || (TotalMatchesOf(cancelled) is not > 0 && !isDeepLink))
+                {
+                    break;
+                }
+
+                ApplyReloadedContext(task, isDeepLink);
+                ackEligibleTaskId = null;
+                activeTaskId = task.TaskId;
+                taskState = "Cancelled";
+                ApplyCancelledResult(cancelled);
+                break;
+            }
+
+            default:
+                break;
+        }
+    }
+
+    // CAS-057: best-effort fetch of a Cancelled task's totals and counts (page 1, size 1); null when
+    // unreadable, so the caller falls back to the plain empty state.
+    private async Task<SearchResultsResponse?> GetCancelledResultAsync(HttpClient client, int taskId)
+    {
+        using var response = await TryGetAsync(client, $"search/{taskId}/results?page=1&pageSize=1", "GET /search/{taskId}/results");
+        if (response is null)
+        {
+            return null;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Logger.LogWarning("KeywordSearch screen: unexpected {StatusCode} from {Endpoint}", (int)response.StatusCode, "GET /search/{taskId}/results");
+            return null;
+        }
+
+        try
+        {
+            return await response.Content.ReadFromJsonAsync<SearchResultsResponse>();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            Logger.LogWarning("KeywordSearch screen: unreadable body from {Endpoint}", "GET /search/{taskId}/results");
+            return null;
+        }
+    }
+
+    // CAS-057 §2.4/§2.5: match total plus the "Search cancelled ..." notice (checked/total from the result).
+    private void ApplyCancelledResult(SearchResultsResponse result)
+    {
+        totalMatches = TotalMatchesOf(result);
+        var matches = totalMatches ?? 0;
+        var checkedText = result.ItemsProcessed is { } done && result.ItemsTotal is { } total
+            ? $" — {done:N0} of {total:N0} items were checked"
+            : string.Empty;
+
+        taskNotice = matches > 0
+            ? $"Search cancelled{checkedText}. Showing the {matches:N0} matches found so far; these results are incomplete."
+            : $"Search cancelled{checkedText}; no matches were found.";
+    }
+
+    private void ApplyReloadedContext(TaskDetailResponse task, bool isDeepLink)
+    {
+        // CAS-048 V10: only a task the user explicitly opened (a deep link) is acknowledged from here;
+        // the silent latest-task reload on a plain open must not clear the badge.
+        ackEligibleTaskId = isDeepLink && !task.IsAcknowledged ? task.TaskId : null;
+        reloadedSubmittedAtUtc = task.SubmittedAt;
+        reloadedSearchParameters = task.SearchParameters;
+        resultsMode = ModeOf(task.SearchParameters);
+
+        // CAS-039 A4 (supersedes CAS-030 §8.2 step 3 filter-bar prefill for this screen): the task's
+        // term, extension and dates are NOT copied into the filter bar, which keeps its field
+        // initialisers (empty term, empty dates, Extension "All") on every open. The task is described
+        // by the context header (reloadedSearchParameters) instead.
+
+        // CAS-048 §2.4: a deep link selects the mode from the task; a plain open stays in Files, and the
+        // reloaded results appear when that mode is selected.
+        if (isDeepLink)
+        {
+            SelectModeFor(resultsMode);
+        }
+    }
+
+    // A search still Queued/Running when the page opens (refresh, new tab, deep link) restores the criteria
+    // the user submitted - mode, term, extension and dates - so the filter bar keeps describing the running
+    // search. Narrows CAS-039 A4's "never prefill" to running tasks only; finished tasks still open with the
+    // default filter bar and are described by the context header.
+    private void PrefillFilterFromRunningTask(TaskSearchParameters? parameters)
+    {
+        if (parameters is null)
+        {
+            return;
+        }
+
+        SelectModeFor(ModeOf(parameters));
+
+        if (!isDateMode)
+        {
+            searchTerm = parameters.Term ?? string.Empty;
+        }
+
+        var extension = ExtensionOptions.FirstOrDefault(e => string.Equals(e, parameters.Extension, StringComparison.OrdinalIgnoreCase));
+        if (extension is not null)
+        {
+            selectedExtension = extension;
+        }
+
+        if (isDateMode)
+        {
+            fromDateText = parameters.FromDate?.ToString(DateFormat, CultureInfo.InvariantCulture) ?? string.Empty;
+            toDateText = parameters.ToDate?.ToString(DateFormat, CultureInfo.InvariantCulture) ?? string.Empty;
+        }
+    }
+
+    // CAS-048 §2.3/§2.4: the task's mode; a legacy task (mode null) is Keyword Search, except legacy
+    // date-only (blank term with both dates), which is Date Search.
+    private static string ModeOf(TaskSearchParameters? parameters) => parameters switch
+    {
+        { Mode: FilenameMode } => FilenameMode,
+        { Mode: KeywordMode } => KeywordMode,
+        { Mode: DateMode } => DateMode,
+        { Mode: null, FromDate: not null, ToDate: not null } when string.IsNullOrEmpty(parameters.Term) => DateMode,
+        _ => KeywordMode
+    };
+
+    // CAS-048 §2.2/§2.4: a Completed task needs no search rerun and no result fetch here — the explorer
+    // reads stored rows through browse. Only the "M matches in total" figure is requested, best effort.
+    private async Task LoadCompletedResultsAsync(HttpClient client, int taskId)
+    {
+        activeTaskId = taskId;
+        taskState = "Completed";
+        totalMatches = null;
+
+        using var response = await TryGetAsync(client, $"search/{taskId}/results?page=1&pageSize=1", "GET /search/{taskId}/results");
+        if (response is null)
+        {
+            return;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Logger.LogWarning("KeywordSearch screen: unexpected {StatusCode} from {Endpoint}", (int)response.StatusCode, "GET /search/{taskId}/results");
+            return;
+        }
+
+        try
+        {
+            var result = await response.Content.ReadFromJsonAsync<SearchResultsResponse>();
+            totalMatches = TotalMatchesOf(result);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            Logger.LogWarning("KeywordSearch screen: unreadable body from {Endpoint}", "GET /search/{taskId}/results");
+        }
+    }
+
+    // The status-bar figure: filename plus content totals (a new-mode task only has one kind of row).
+    private static int? TotalMatchesOf(SearchResultsResponse? result) =>
+        result is null || result.Status is not ("Completed" or "Cancelled")
+            ? null
+            : (result.FilenameMatches?.TotalCount ?? 0) + (result.ContentMatches?.TotalCount ?? 0);
+
+    /// <summary>
+    /// CAS-030 §7 V9/V10 for the reload calls: <c>null</c> on a 401 (sets the session-expired
+    /// state) or on a transient network failure (logged); otherwise the response.
+    /// </summary>
+    private async Task<HttpResponseMessage?> TryGetAsync(HttpClient client, string uri, string endpoint)
+    {
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.GetAsync(uri);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Logger.LogWarning("{Component}: transient poll failure on {Endpoint}", ScreenName, endpoint);
+            return null;
+        }
+
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            Logger.LogWarning("{Component}: poll stopped on 401 from {Endpoint}", ScreenName, endpoint);
+            sessionExpired = true;
+            response.Dispose();
+            return null;
+        }
+
+        return response;
+    }
+
+    // Dismiss the failed-search banner: acknowledge the task so it stays hidden on later opens.
+    private async Task DismissFailureAsync()
+    {
+        if (activeTaskId is { } taskId)
+        {
+            await AcknowledgeAsync(taskId);
+        }
+
+        taskState = "None";
+        failureDetail = null;
+        activeTaskId = null;
+        ackEligibleTaskId = null;
+        reloadedSearchParameters = null;
+        reloadedSubmittedAtUtc = null;
+    }
+
+    // CAS-030 §8.5: failures are logged at Warning and never shown; the next open retries.
+    private async Task AcknowledgeAsync(int taskId)
+    {
+        var client = HttpClientFactory.CreateClient("CachetApi");
+        try
+        {
+            using var response = await client.PostAsync($"tasks/{taskId}/acknowledge", content: null);
+            if (response.StatusCode != System.Net.HttpStatusCode.NoContent)
+            {
+                Logger.LogWarning("{Component}: acknowledge of task {TaskId} returned {StatusCode}", ScreenName, taskId, (int)response.StatusCode);
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Logger.LogWarning("{Component}: acknowledge of task {TaskId} failed to reach the Api", ScreenName, taskId);
+        }
+    }
+
+    private async Task LoadQuarantineAsync()
+    {
+        quarantineErrorBanner = null;
+        quarantineLoading = true;
+        try
+        {
+            // CAS-052: an out-of-range page (rows deleted in the modal) clamps to the new last page
+            // with one re-request; an empty queue is page 1 of 1.
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                if (!await FetchQuarantinePageAsync())
+                {
+                    return;
+                }
+
+                var lastPage = Math.Max(1, (int)Math.Ceiling(quarantineTotalCount / (double)quarantinePageSize));
+                if (quarantinePage <= lastPage)
+                {
+                    break;
+                }
+
+                quarantinePage = lastPage;
+            }
+        }
+        finally
+        {
+            quarantineLoading = false;
+        }
+    }
+
+    // Returns false when the request failed (banner set).
+    private async Task<bool> FetchQuarantinePageAsync()
+    {
+        var client = HttpClientFactory.CreateClient("CachetApi");
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.GetAsync($"quarantine?page={quarantinePage}&pageSize={quarantinePageSize}");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Logger.LogWarning(ex, "KeywordSearch screen: unable to reach Api for {Endpoint}", "GET /quarantine");
+            quarantineErrorBanner = GenericErrorMessage;
+            return false;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Logger.LogWarning("KeywordSearch screen: unexpected {StatusCode} from {Endpoint}", (int)response.StatusCode, "GET /quarantine");
+            quarantineErrorBanner = GenericErrorMessage;
+            return false;
+        }
+
+        var body = await response.Content.ReadFromJsonAsync<QuarantineListResponse>();
+        quarantineItems = body?.Items ?? Array.Empty<QuarantineListItem>();
+        quarantineTotalCount = body?.TotalCount ?? 0;
+        if (quarantineTotalCount == 0)
+        {
+            quarantinePage = 1;
+        }
+
+        return true;
+    }
+
+    private async Task GoToQuarantinePageAsync(int target)
+    {
+        quarantinePage = target;
+        await LoadQuarantineAsync();
+    }
+
+    private async Task ChangeQuarantinePageSizeAsync(int size)
+    {
+        quarantinePageSize = size;
+        quarantinePage = 1;
+        await LoadQuarantineAsync();
+    }
+
+    // CAS-024 §3/§8.1: opens the shared modal; SC-9's own refresh is wired via the modal's
+    // OnDeleteCompleted="LoadQuarantineAsync" binding above (and CAS-052 §2.8's OnClosed), not from here.
+    // CAS-040 §8.2: a name click opens the viewer only — it never touches row selection.
+    private void OpenFileViewer(int fileIndexId, string context, string returnFocusKey)
+    {
+        viewerContext = context;
+        viewerFromExplorer = false;
+        viewerReturnFocusKey = returnFocusKey;
+        viewerFileIndexId = fileIndexId;
+    }
+
+    // CAS-044 §8.3: a file opened from the Files explorer; focus returns to its row on close.
+    private const string FileBrowserContext = "FileBrowser";
+
+    private void OpenBrowserFileViewer(int fileIndexId)
+    {
+        viewerContext = FileBrowserContext;
+        viewerFromExplorer = true;
+        viewerReturnFocusKey = null;
+        viewerFileIndexId = fileIndexId;
+    }
+
+    // CAS-048 §2.2: a file opened from the results explorer keeps the KeywordSearch context (not
+    // FileBrowser), so the audit trail stays tied to the search.
+    private void OpenResultFileViewer(int fileIndexId)
+    {
+        viewerContext = KeywordSearchContext;
+        viewerFromExplorer = true;
+        viewerReturnFocusKey = null;
+        viewerFileIndexId = fileIndexId;
+    }
+
+    // CAS-040 §8.4: closing returns focus to the name button that opened the viewer.
+    private async Task CloseFileViewerAsync()
+    {
+        var wasExplorerFile = viewerFromExplorer;
+        viewerFileIndexId = null;
+        if (wasExplorerFile && fileExplorer is not null)
+        {
+            await fileExplorer.FocusSelectedRowAsync();
+            return;
+        }
+
+        if (viewerReturnFocusKey is not null && fileLinkRefs.TryGetValue(viewerReturnFocusKey, out var button))
+        {
+            try
+            {
+                await button.FocusAsync();
+            }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException)
+            {
+                // Circuit gone or element no longer rendered — nothing to focus.
+            }
+        }
+    }
+
+    private static string FileLinkKey(string panel, int fileId) => $"{panel}-{fileId}";
+
+    private async Task OpenQuarantineQueueModal()
+    {
+        if (quarantineModal is not null)
+        {
+            await quarantineModal.OpenAsync();
+        }
+    }
+
+    // CAS-032 §8.1: opens the shared report modal in the requested mode.
+    private async Task OpenReportModal(ReportKind kind)
+    {
+        if (reportModal is not null)
+        {
+            await reportModal.OpenAsync(kind);
+        }
+    }
+
+    // CAS-031 §3: opens the shared Audit Log modal.
+    private async Task OpenAuditLogModal()
+    {
+        if (auditLogModal is not null)
+        {
+            await auditLogModal.OpenAsync();
+        }
+    }
+
+    private async Task HandleSearchAsync()
+    {
+        // CAS-039 §2.5: same condition as the Search button's disabled state.
+        if (!CanSearch)
+        {
+            return;
+        }
+
+        // CAS-039 §2.2/§2.3: dates only in Date mode (already validated by CanSearch above); the
+        // user's mode and date entries are left as-is for the next search.
+        DateOnly? fromDate = null;
+        DateOnly? toDate = null;
+        if (isDateMode && TryParseDate(fromDateText, out var parsedFrom) && TryParseDate(toDateText, out var parsedTo))
+        {
+            fromDate = parsedFrom;
+            toDate = parsedTo;
+        }
+
+        searchErrorBanner = null;
+        // CAS-048 §2.2/SC-8: a new search hides the previous results and clears the selection.
+        taskState = "None";
+        resultsMode = null;
+        totalMatches = null;
+        // CAS-030: a new search replaces any reloaded/deep-linked task context (§8.2).
+        taskNotice = null;
+        failureDetail = null;
+        reloadedSearchParameters = null;
+        ackEligibleTaskId = null;
+        selectedResultIds.Clear();
+
+        // CAS-039 A2/A3: in Date mode the term is always empty (cleared on entering Date mode), so it
+        // is posted as Term = "" (date-only search).
+        var trimmedTerm = searchTerm.Trim();
+        var bucket = bucketName!; // CanSearch above already returned on string.IsNullOrWhiteSpace(bucketName)
+
+        var client = HttpClientFactory.CreateClient("CachetApi");
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.PostAsJsonAsync("search", new SearchRequest
+            {
+                Term = trimmedTerm,
+                Bucket = bucket,
+                Extension = selectedExtension,
+                FromDate = fromDate,
+                ToDate = toDate,
+                // CAS-048 V3: always the selected radio's mode; Filename and Keyword post no dates.
+                Mode = CurrentMode
+            });
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Logger.LogWarning(ex, "KeywordSearch screen: unable to reach Api for {Endpoint}", "POST /search");
+            searchErrorBanner = GenericErrorMessage;
+            return;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Logger.LogWarning("KeywordSearch screen: unexpected {StatusCode} from {Endpoint}", (int)response.StatusCode, "POST /search");
+            searchErrorBanner = GenericErrorMessage;
+            return;
+        }
+
+        var submitted = await response.Content.ReadFromJsonAsync<SearchSubmittedResponse>();
+        if (submitted is null)
+        {
+            searchErrorBanner = GenericErrorMessage;
+            return;
+        }
+
+        resultsMode = CurrentMode;
+        activeTaskId = submitted.TaskId;
+        submittedAtUtc = submitted.SubmittedAt;
+        isSearchInFlight = true;
+        taskState = "InProgress";
+        pollCount = 0;
+        progressProcessed = null;
+        progressTotal = null;
+        progressStartedAtUtc = null;
+        // The in-progress banner is the single status message for a running search (no separate
+        // "Search submitted" toast); a stale toast from an earlier action is cleared.
+        toastMessage = null;
+
+        Logger.LogInformation("KeywordSearch screen: search submitted, TaskId={TaskId}", activeTaskId);
+
+        // Fire-and-forget: the poll loop reports back into component state via InvokeAsync/StateHasChanged.
+        _ = PollTaskAsync(activeTaskId.Value);
+    }
+
+    private async Task PollTaskAsync(int taskId, TimeSpan? interval = null)
+    {
+        pollCts?.Cancel();
+        pollCts?.Dispose();
+        pollCts = new CancellationTokenSource();
+        pollTimer?.Dispose();
+        // CAS-030 §8.4: one config-bound interval (Worker:TaskManagerPollIntervalSeconds, default 10 s);
+        // CAS-057 §2.3: restarted at CancellingPollInterval while a cancel is pending.
+        pollTimer = new PeriodicTimer(interval ?? PollingOptions.Value.PollInterval);
+        var client = HttpClientFactory.CreateClient("CachetApi");
+
+        try
+        {
+            while (await pollTimer.WaitForNextTickAsync(pollCts.Token))
+            {
+                pollCount++;
+
+                HttpResponseMessage response;
+                try
+                {
+                    response = await client.GetAsync($"search/{taskId}/results", pollCts.Token);
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+                {
+                    // Transient network/server error while polling (§8.5) — keep polling rather
+                    // than surfacing a banner for a single missed tick.
+                    Logger.LogWarning(ex, "KeywordSearch screen: unable to reach Api for {Endpoint}", "GET /search/{taskId}/results");
+                    continue;
+                }
+
+                if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+                {
+                    // 409 task-not-complete (CAS-006 §6.2) — refresh progress, redraw the elapsed time, keep polling.
+                    await RefreshProgressAsync(client, taskId, pollCts.Token);
+                    await InvokeAsync(StateHasChanged);
+                    continue;
+                }
+
+                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    // CAS-030 §7 V9: stop this loop and tell the user to sign in again.
+                    Logger.LogWarning("{Component}: poll stopped on 401 from {Endpoint}", ScreenName, "GET /search/{taskId}/results");
+                    sessionExpired = true;
+                    isSearchInFlight = false;
+                    isCancelRequested = false;
+                    showCancelConfirm = false;
+                    await InvokeAsync(StateHasChanged);
+                    return;
+                }
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    Logger.LogWarning("KeywordSearch screen: unexpected {StatusCode} from {Endpoint}", (int)response.StatusCode, "GET /search/{taskId}/results");
+                    searchErrorBanner = GenericErrorMessage;
+                    isSearchInFlight = false;
+                    isCancelRequested = false;
+                    showCancelConfirm = false;
+                    await InvokeAsync(StateHasChanged);
+                    return;
+                }
+
+                var result = await response.Content.ReadFromJsonAsync<SearchResultsResponse>(cancellationToken: pollCts.Token);
+                if (result is null)
+                {
+                    continue;
+                }
+
+                isSearchInFlight = false;
+                var wasCancelling = isCancelRequested;
+                isCancelRequested = false;
+                showCancelConfirm = false;
+
+                if (string.Equals(result.Status, "Completed", StringComparison.Ordinal))
+                {
+                    taskState = "Completed";
+                    totalMatches = TotalMatchesOf(result);
+
+                    // CAS-057 §2.6: the search finished before the cancel took effect.
+                    if (wasCancelling)
+                    {
+                        toastMessage = "The search finished before it could be cancelled.";
+                    }
+                }
+                else if (string.Equals(result.Status, "Cancelled", StringComparison.Ordinal))
+                {
+                    // CAS-057 §2.4/§2.5: partial results (if any) + notice; never "Failed".
+                    taskState = "Cancelled";
+                    ApplyCancelledResult(result);
+                }
+                else
+                {
+                    taskState = "Failed";
+                }
+
+                Logger.LogInformation("KeywordSearch screen: task {TaskId} completed after {PollCount} polls", taskId, pollCount);
+
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Component disposed or a new search superseded this poll loop — stop silently.
+        }
+    }
+
+    // CAS-057 §2.2: first click only opens the inline confirm; [Keep running] restores the button.
+    private void ShowCancelConfirm() => showCancelConfirm = true;
+
+    private void KeepSearchRunning() => showCancelConfirm = false;
+
+    // CAS-057 §2.3: POST tasks/{id}/cancel, only after the confirm. isCancelRequested is the single-shot guard
+    // (set before the first await). Logs the task id and status only — never term, path or file name.
+    private async Task CancelSearchAsync()
+    {
+        if (isCancelRequested || activeTaskId is not { } taskId)
+        {
+            return;
+        }
+
+        isCancelRequested = true;
+        showCancelConfirm = false;
+
+        var client = HttpClientFactory.CreateClient("CachetApi");
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.PostAsync($"tasks/{taskId}/cancel", null);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Logger.LogWarning(ex, "KeywordSearch screen: unable to reach Api for {Endpoint}, TaskId={TaskId}", "POST /tasks/{taskId}/cancel", taskId);
+            isCancelRequested = false;
+            searchErrorBanner = GenericErrorMessage;
+            return;
+        }
+
+        using (response)
+        {
+            Logger.LogInformation("KeywordSearch screen: cancel requested, TaskId={TaskId}, StatusCode={StatusCode}", taskId, (int)response.StatusCode);
+
+            switch (response.StatusCode)
+            {
+                case System.Net.HttpStatusCode.OK:
+                case System.Net.HttpStatusCode.Accepted:
+                    // Stay "Cancelling" (filter bar disabled); poll faster until the task leaves Running.
+                    _ = PollTaskAsync(taskId, CancellingPollInterval);
+                    break;
+
+                case System.Net.HttpStatusCode.Conflict:
+                    // task-not-cancellable: it just finished — the running poll renders the real outcome.
+                    isCancelRequested = false;
+                    toastMessage = "The search had already finished.";
+                    break;
+
+                case System.Net.HttpStatusCode.Unauthorized:
+                    // Same handling as a 401 from the poll (CAS-030 §7 V9).
+                    pollCts?.Cancel();
+                    sessionExpired = true;
+                    isSearchInFlight = false;
+                    isCancelRequested = false;
+                    break;
+
+                default:
+                    isCancelRequested = false;
+                    searchErrorBanner = GenericErrorMessage;
+                    break;
+            }
+        }
+    }
+
+    // CAS-048 §2.2/V6: the explorer reports ids it got from browse / result-ids responses; nothing typed
+    // or built here is ever added.
+    private void OnResultSelectionChanged(FileExplorer.SelectionChange change)
+    {
+        foreach (var id in change.Ids)
+        {
+            if (change.Selected)
+            {
+                selectedResultIds.Add(id);
+            }
+            else
+            {
+                selectedResultIds.Remove(id);
+            }
+        }
+    }
+
+    private async Task SendToQuarantineAsync()
+    {
+        var selectedIds = selectedResultIds;
+        if (selectedIds.Count == 0 || activeTaskId is null)
+        {
+            return;
+        }
+
+        var fileIds = selectedIds.ToList();
+
+        var client = HttpClientFactory.CreateClient("CachetApi");
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.PostAsJsonAsync("search/results/quarantine", new QuarantineAddRequest
+            {
+                TaskId = activeTaskId.Value,
+                FileIds = fileIds
+            });
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Logger.LogWarning(ex, "KeywordSearch screen: unable to reach Api for {Endpoint}", "POST /search/results/quarantine");
+            searchErrorBanner = GenericErrorMessage;
+            return;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Logger.LogWarning("KeywordSearch screen: unexpected {StatusCode} from {Endpoint}", (int)response.StatusCode, "POST /search/results/quarantine");
+            searchErrorBanner = GenericErrorMessage;
+            return;
+        }
+
+        var body = await response.Content.ReadFromJsonAsync<QuarantineAddResponse>();
+        var addedCount = body?.Items.Count ?? 0;
+
+        // §10 SC-7: partial-success warnings surfaced without discarding the files that did
+        // succeed — clear the selection for the rows just processed either way.
+        selectedIds.Clear();
+
+        toastMessage = body?.Warnings is { Count: > 0 } warnings
+            ? $"{addedCount} file(s) sent to Quarantine. {string.Join(" ", warnings)}"
+            : $"{addedCount} file(s) sent to Quarantine.";
+
+        await LoadQuarantineAsync();
+    }
+
+    // CAS-025 §3/§8.5: display-only chip color mapping (UI/UX Spec §1.3). No DTO/API/event-handler
+    // change — purely which CSS class a given status string renders with. The cachet-chip-* classes
+    // carry the wireframe colors (app.css); the cachet-ks-chip-* names are kept as stable hooks.
+    private static string ChipClass(string? status) => status switch
+    {
+        "Flagged" => "cachet-chip cachet-chip-flagged cachet-ks-chip cachet-ks-chip-flagged",
+        "Needs Review" => "cachet-chip cachet-chip-needs-review cachet-ks-chip cachet-ks-chip-needs-review",
+        "Informational" => "cachet-chip cachet-chip-informational cachet-ks-chip cachet-ks-chip-informational",
+        "Quarantined" => "cachet-chip cachet-chip-needs-review cachet-ks-chip",
+        _ => "cachet-chip cachet-chip-neutral cachet-ks-chip"
+    };
+
+    private void ToggleCollapsed(string panel)
+    {
+        if (!collapsedPanels.Remove(panel))
+        {
+            collapsedPanels.Add(panel);
+        }
+    }
+
+    private string CollapseIcon(string panel) => collapsedPanels.Contains(panel) ? "▸" : "▾";
+
+    private static string FormatRelativeTime(DateTimeOffset? at)
+    {
+        if (at is null)
+        {
+            return "just now";
+        }
+
+        var elapsed = DateTimeOffset.UtcNow - at.Value;
+        if (elapsed < TimeSpan.FromMinutes(1))
+        {
+            return "less than a minute";
+        }
+
+        if (elapsed < TimeSpan.FromHours(1))
+        {
+            var minutes = (int)elapsed.TotalMinutes;
+            return $"{minutes} minute{(minutes == 1 ? string.Empty : "s")}";
+        }
+
+        var hours = (int)elapsed.TotalHours;
+        return $"{hours} hour{(hours == 1 ? string.Empty : "s")}";
+    }
+
+    private async Task RefreshProgressAsync(HttpClient client, int taskId, CancellationToken ct)
+    {
+        try
+        {
+            using var response = await client.GetAsync($"tasks/{taskId}", ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                return;
+            }
+
+            var task = await response.Content.ReadFromJsonAsync<TaskDetailResponse>(cancellationToken: ct);
+            if (task is null)
+            {
+                return;
+            }
+
+            progressProcessed = task.ItemsProcessed;
+            progressTotal = task.ItemsTotal;
+            progressStartedAtUtc = task.StartTime;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            // Progress is advisory — a missed refresh just leaves the previous figures on screen.
+            Logger.LogWarning(ex, "KeywordSearch screen: unable to reach Api for {Endpoint}", "GET /tasks/{taskId}");
+        }
+    }
+
+    private static string FormatElapsed(TimeSpan span)
+    {
+        if (span < TimeSpan.Zero)
+        {
+            span = TimeSpan.Zero;
+        }
+
+        if (span.TotalHours >= 1)
+        {
+            return $"{(int)span.TotalHours}h {span.Minutes}m";
+        }
+
+        return span.TotalMinutes >= 1 ? $"{(int)span.TotalMinutes}m {span.Seconds}s" : $"{(int)span.TotalSeconds}s";
+    }
+
+    // Estimate = measured rate so far, extrapolated; only offered past a minimum sample (EtaMinFractionDone
+    // of the items and EtaMinElapsed of running time) so an early, noisy rate is never shown as a prediction.
+    private string? ProgressDetailText
+    {
+        get
+        {
+            if (progressProcessed is not { } done || progressTotal is not { } total || total <= 0)
+            {
+                return null;
+            }
+
+            var detail = $"{done:N0} of {total:N0} items processed ({100.0 * done / total:0}%).";
+
+            var runningSince = progressStartedAtUtc ?? submittedAtUtc;
+            if (runningSince is null || done <= 0 || done >= total)
+            {
+                return detail;
+            }
+
+            var runningFor = DateTimeOffset.UtcNow - runningSince.Value;
+            if ((double)done / total < EtaMinFractionDone || runningFor < EtaMinElapsed)
+            {
+                return detail;
+            }
+
+            var remaining = TimeSpan.FromTicks((long)(runningFor.Ticks * ((double)(total - done) / done)));
+            return $"{detail} Estimated time remaining: about {FormatElapsed(remaining)}.";
+        }
+    }
+
+    // CAS-027 §8.3: a deep-linked task has no known submittedAtUtc — this fallback omits the
+    // elapsed-time clause rather than showing a broken/blank relative-time string.
+    private string ProgressBannerText
+    {
+        get
+        {
+            // CAS-057 §2.3: replaces the progress text while a cancel is pending.
+            if (isCancelRequested)
+            {
+                return CancellingBannerText;
+            }
+
+            // Filename and Date searches are fast — a plain message, no timer or estimate.
+            if (!string.Equals(resultsMode, KeywordMode, StringComparison.Ordinal))
+            {
+                return "Search in progress. Results will appear here automatically when ready.";
+            }
+
+            var text = submittedAtUtc is not null
+                ? $"Search in progress — running for {FormatElapsed(DateTimeOffset.UtcNow - submittedAtUtc.Value)}."
+                : "Search in progress.";
+
+            if (ProgressDetailText is { } detail)
+            {
+                text += " " + detail;
+            }
+
+            return text + " Results will appear here automatically when ready.";
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        pollCts?.Cancel();
+        pollTimer?.Dispose();
+        pollCts?.Dispose();
+        await ValueTask.CompletedTask;
+    }
+}

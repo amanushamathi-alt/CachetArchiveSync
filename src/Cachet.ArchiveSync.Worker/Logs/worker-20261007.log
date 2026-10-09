@@ -1,0 +1,5 @@
+2026-10-07 18:54:00.159 +05:30 [WRN] Cachet.ArchiveSync.Worker.B2MirrorSyncTaskProcessor: B2MirrorSync task 101457: object D/Shares/Operations/ failed; continuing {}
+System.UnauthorizedAccessException: Access to the path is denied.
+   at System.IO.FileSystem.MoveFile(String sourceFullPath, String destFullPath, Boolean overwrite)
+   at Cachet.ArchiveSync.Worker.B2MirrorSyncTaskProcessor.DownloadVerifiedAsync(B2FileInfo b2File, String destinationPath, CancellationToken ct) in D:\Anusha\TFS\2026_JUL\CachetArchiveSync\src\Cachet.ArchiveSync.Worker\B2MirrorSyncTaskProcessor.cs:line 274
+   at Cachet.ArchiveSync.Worker.B2MirrorSyncTaskProcessor.ProcessAsync(ClaimedTaskRow task, CancellationToken ct) in D:\Anusha\TFS\2026_JUL\CachetArchiveSync\src\Cachet.ArchiveSync.Worker\B2MirrorSyncTaskProcessor.cs:line 150

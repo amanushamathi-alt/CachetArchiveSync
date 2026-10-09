@@ -1,0 +1,602 @@
+@* CAS-032 §3/§8: shared Pre-Action Impact Report (FR-25) / Post-Action Outcome Report (FR-26)
+   modal, reachable from both KeywordSearch.razor and ODriveSyncContentScan.razor via per-page
+   trigger buttons (§0.3). Same non-routed, @ref-opened convention as QuarantineQueueModal.razor
+   (CAS-024) — opened via the public OpenAsync(ReportKind) method. The on-screen table comes from
+   the preview GETs (§6.2); Download PDF / Download XLSX each run a fresh on-demand generation via
+   CAS-015's POSTs (§6.1) and stream the bytes to the browser (FR-27) — nothing is written to disk
+   or cached on the Web server (SC-10, BRD §12.3 item 9). *@
+@implements IDisposable
+@using System.Diagnostics
+@using System.Globalization
+@using Cachet.ArchiveSync.Core.Dtos
+
+@if (isOpen)
+{
+    <div class="cachet-modal-backdrop">
+        <div class="cachet-modal cachet-report-modal" role="dialog" aria-modal="true" aria-labelledby="cachet-report-title">
+            <div class="cachet-modal-header">
+                <div class="cachet-report-heading">
+                    <h2 id="cachet-report-title">@Title</h2>
+                    <span class="cachet-report-subtitle">@ActiveTabLabel</span>
+                </div>
+                <button type="button" class="cachet-report-close" aria-label="Close report" @onclick="Close">×</button>
+            </div>
+
+            @* §8.5/V6: 401 from either call — the existing KeywordSearch.razor session-expired pattern. *@
+            @if (sessionExpired)
+            {
+                <div class="cachet-banner cachet-banner-error cachet-report-error-banner">
+                    @SessionExpiredMessage <a href="login">Sign in</a>
+                </div>
+            }
+
+            @if (previewErrorBanner is not null)
+            {
+                <div class="cachet-banner cachet-banner-error cachet-report-error-banner">
+                    @previewErrorBanner
+                    <button type="button" class="cachet-btn cachet-report-retry-btn" @onclick="RetryAsync">Retry</button>
+                </div>
+            }
+
+            @if (downloadErrorBanner is not null)
+            {
+                <div class="cachet-banner cachet-banner-error cachet-report-error-banner">@downloadErrorBanner</div>
+            }
+
+            @if (previewLoaded)
+            {
+                <p class="cachet-report-meta">Generated @FormatUtc(generatedAt) by @generatedBy.</p>
+
+                <div class="cachet-report-summary">
+                    <span class="cachet-report-summary-item">Total: <strong>@RowCount</strong></span>
+                    @foreach (var (label, count) in summaryGroups)
+                    {
+                        <span class="cachet-report-summary-item">@label: <strong>@count</strong></span>
+                    }
+                </div>
+            }
+
+            <div class="cachet-modal-body" aria-busy="@(isLoading ? "true" : "false")">
+                @if (isLoading)
+                {
+                    <p class="cachet-modal-empty" aria-live="polite">Generating report… This may take a moment for large reports.</p>
+                }
+                else if (previewLoaded && RowCount == 0)
+                {
+                    <p class="cachet-modal-empty">@EmptyStateMessage</p>
+                }
+                else if (previewLoaded && kind == ReportKind.PreAction)
+                {
+                    <table class="cachet-grid-table cachet-report-table">
+                        <thead>
+                            <tr>
+                                <th>File</th>
+                                <th class="cachet-col-a">Panel</th>
+                                <th class="cachet-col-status">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @* §8.2: rows can approach the 100,000 cap — non-virtualized rendering over
+                               SignalR at that size is not viable. *@
+                            <Virtualize Items="preRows" Context="row" SpacerElement="tr">
+                                <tr>
+                                    <td>
+                                        <div class="cachet-cell-name" title="@row.FileName">@row.FileName</div>
+                                        <span class="cachet-cell-path" title="@row.FilePath">@row.FilePath</span>
+                                    </td>
+                                    <td>@row.Panel</td>
+                                    <td><span class="@ChipClass(row.Status)">@row.Status</span></td>
+                                </tr>
+                            </Virtualize>
+                        </tbody>
+                    </table>
+                }
+                else if (previewLoaded)
+                {
+                    <table class="cachet-grid-table cachet-report-table">
+                        <thead>
+                            <tr>
+                                <th>File</th>
+                                <th class="cachet-col-a">Action Taken</th>
+                                <th class="cachet-col-a">Source Tab</th>
+                                <th class="cachet-col-a">Timestamp</th>
+                                <th class="cachet-col-b">Result</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <Virtualize Items="postRows" Context="row" SpacerElement="tr">
+                                <tr>
+                                    <td>
+                                        @if (row.FileName is null && row.FilePath is null)
+                                        {
+                                            @* §8.2: task-level action with no single associated file. *@
+                                            <div class="cachet-cell-name">—</div>
+                                        }
+                                        else
+                                        {
+                                            <div class="cachet-cell-name" title="@row.FileName">@row.FileName</div>
+                                            <span class="cachet-cell-path" title="@row.FilePath">@row.FilePath</span>
+                                        }
+                                    </td>
+                                    <td>@row.ActionTaken</td>
+                                    <td>@row.SourceTab</td>
+                                    <td>@FormatUtc(row.Timestamp)</td>
+                                    <td>
+                                        @* §8.2/CAS-015 V5: failures are always shown, with a visual chip. *@
+                                        @if (string.Equals(row.Result, "Failure", StringComparison.Ordinal))
+                                        {
+                                            <span class="cachet-chip cachet-chip-flagged cachet-report-chip">@row.Result</span>
+                                        }
+                                        else
+                                        {
+                                            @row.Result
+                                        }
+                                    </td>
+                                </tr>
+                            </Virtualize>
+                        </tbody>
+                    </table>
+                }
+            </div>
+
+            <div class="cachet-modal-footer cachet-report-footer">
+                <p class="cachet-report-disclosure">
+                    Generated on demand as PDF and XLSX — not saved on the server. Each download is generated
+                    fresh and reflects the data at the moment it is generated.
+                </p>
+                <button type="button"
+                        class="cachet-btn cachet-report-download-pdf-btn"
+                        disabled="@(!DownloadsEnabled)"
+                        @onclick="@(() => DownloadAsync(PdfFormat))">
+                    @if (downloadInFlightFormat == PdfFormat)
+                    {
+                        <span class="cachet-report-spinner" aria-hidden="true"></span>
+                        @:Generating PDF…
+                    }
+                    else
+                    {
+                        @:Download PDF
+                    }
+                </button>
+                <button type="button"
+                        class="cachet-btn cachet-report-download-xlsx-btn"
+                        disabled="@(!DownloadsEnabled)"
+                        @onclick="@(() => DownloadAsync(XlsxFormat))">
+                    @if (downloadInFlightFormat == XlsxFormat)
+                    {
+                        <span class="cachet-report-spinner" aria-hidden="true"></span>
+                        @:Generating XLSX…
+                    }
+                    else
+                    {
+                        @:Download XLSX
+                    }
+                </button>
+                <button type="button" class="cachet-btn cachet-report-close-btn" @onclick="Close">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    // §8.5 copy.
+    private const string PreviewErrorMessage = "Something went wrong generating this report. Please try again.";
+    private const string GenerationFailedMessage = "Report generation failed. Please try again.";
+    // Same text as KeywordSearch.razor's SessionExpiredMessage (CAS-030 §7 V9), duplicated locally
+    // as that page already does in ODriveSyncContentScan.razor — no shared constant exists (P4).
+    private const string SessionExpiredMessage = "Your session has expired — sign in again to see results.";
+
+    // §7 V2: the only two format literals ever sent — chosen by the button, never from user text.
+    private const string PdfFormat = "pdf";
+    private const string XlsxFormat = "xlsx";
+    private const string PdfContentType = "application/pdf";
+    private const string XlsxContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+    /// <summary>§8.1: the host page's tab label, fixed per host — shown as the subtitle and sent
+    /// as the cosmetic <c>activeTabLabel</c> (a label, not a filter).</summary>
+    [Parameter] public string ActiveTabLabel { get; set; } = string.Empty;
+
+    [Inject] private IHttpClientFactory HttpClientFactory { get; set; } = default!;
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+    [Inject] private ILogger<ReportModal> Logger { get; set; } = default!;
+
+    // §8.4 step 7: cancels in-flight calls only when the host component is disposed (navigation or
+    // circuit end) — Close alone never cancels a download.
+    private readonly CancellationTokenSource disposeCts = new();
+
+    private bool isOpen;
+    private bool isLoading;
+    private ReportKind kind;
+
+    // §8.3 point 4/SC-9: bumped by every open, retry and Close, so a response for a superseded open
+    // never overwrites the current modal state.
+    private int openGeneration;
+
+    // §12 Data Handling: report content lives only in component memory while open — cleared on Close.
+    private bool previewLoaded;
+    private DateTimeOffset generatedAt;
+    private string generatedBy = string.Empty;
+    private List<PreActionReportRow> preRows = new();
+    private List<PostActionReportRow> postRows = new();
+    private List<(string Label, int Count)> summaryGroups = new();
+
+    private bool sessionExpired;
+    private string? previewErrorBanner;
+    private string? downloadErrorBanner;
+
+    // §7 V3: at most one download in flight per modal; null when none is running.
+    private string? downloadInFlightFormat;
+
+    // §15 item 1(b): component-private shapes for the §6.2 preview responses until the preview API
+    // spec (not yet minted) adds its Core DTOs; rows reuse the existing Core row types.
+    private sealed record PreActionPreview
+    {
+        public DateTimeOffset GeneratedAt { get; init; }
+
+        public string GeneratedBy { get; init; } = string.Empty;
+
+        public IReadOnlyList<PreActionReportRow> Rows { get; init; } = Array.Empty<PreActionReportRow>();
+    }
+
+    private sealed record PostActionPreview
+    {
+        public DateTimeOffset GeneratedAt { get; init; }
+
+        public string GeneratedBy { get; init; } = string.Empty;
+
+        public IReadOnlyList<PostActionReportRow> Rows { get; init; } = Array.Empty<PostActionReportRow>();
+    }
+
+    private string Title => kind == ReportKind.PreAction ? "PRE-ACTION IMPACT REPORT" : "POST-ACTION OUTCOME REPORT";
+
+    private string EmptyStateMessage => kind == ReportKind.PreAction
+        ? "No files are currently flagged, needing review, or informational across search and quarantine."
+        : "No actions have been recorded yet.";
+
+    private int RowCount => kind == ReportKind.PreAction ? preRows.Count : postRows.Count;
+
+    // §7 V1/V3, §8.5: enabled only after a successful preview (including zero rows), never while a
+    // download is in flight, and never after a 401.
+    private bool DownloadsEnabled => previewLoaded && !isLoading && !sessionExpired && downloadInFlightFormat is null;
+
+    private string KindRoute => kind == ReportKind.PreAction ? "reports/pre-action" : "reports/post-action";
+
+    /// <summary>Opens the modal in the given mode and loads a fresh preview (§8.3). Invoked by a
+    /// host page via <c>@ref</c> — this component is not a routed page.</summary>
+    public async Task OpenAsync(ReportKind reportKind)
+    {
+        kind = reportKind;
+        isOpen = true;
+        Logger.LogInformation("ReportModal: opened {ReportKind} from {ActiveTab}", kind, ActiveTabLabel);
+        await StartPreviewAsync();
+    }
+
+    // §8.5/SC-8: Retry re-runs the §8.3 load for the current mode.
+    private Task RetryAsync() => StartPreviewAsync();
+
+    private async Task StartPreviewAsync()
+    {
+        var generation = ++openGeneration;
+        ClearReportState();
+        downloadErrorBanner = null;
+        isLoading = true;
+        // §8.3 point 1: the modal appears immediately, before the preview GET is issued (SC-2).
+        StateHasChanged();
+
+        await LoadPreviewAsync(generation);
+
+        if (generation == openGeneration)
+        {
+            StateHasChanged();
+        }
+    }
+
+    private void Close()
+    {
+        // §8.3 point 4: abandons any in-flight preview result. §8.4 step 7: an in-flight download is
+        // NOT cancelled — downloadInFlightFormat stays set until it completes, keeping V3 intact if
+        // the modal is reopened meanwhile.
+        openGeneration++;
+        isOpen = false;
+        ClearReportState();
+        downloadErrorBanner = null;
+    }
+
+    private void ClearReportState()
+    {
+        isLoading = false;
+        previewLoaded = false;
+        generatedAt = default;
+        generatedBy = string.Empty;
+        preRows = new();
+        postRows = new();
+        summaryGroups = new();
+        sessionExpired = false;
+        previewErrorBanner = null;
+    }
+
+    private async Task LoadPreviewAsync(int generation)
+    {
+        var ct = disposeCts.Token;
+        var reportKind = kind;
+        var endpoint = $"GET /{KindRoute}/preview";
+        var uri = string.IsNullOrEmpty(ActiveTabLabel)
+            ? $"{KindRoute}/preview"
+            : $"{KindRoute}/preview?activeTabLabel={Uri.EscapeDataString(ActiveTabLabel)}";
+
+        var stopwatch = Stopwatch.StartNew();
+        var client = HttpClientFactory.CreateClient("CachetApi");
+        try
+        {
+            using var response = await client.GetAsync(uri, ct);
+            if (generation != openGeneration)
+            {
+                return;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Logger.LogWarning("ReportModal: unexpected {StatusCode} from {Endpoint}", (int)response.StatusCode, endpoint);
+                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    // §7 V6: session-expired banner, no automatic retry.
+                    sessionExpired = true;
+                }
+                else
+                {
+                    previewErrorBanner = PreviewErrorMessage;
+                }
+
+                isLoading = false;
+                return;
+            }
+
+            int rowCount;
+            if (reportKind == ReportKind.PreAction)
+            {
+                var body = await response.Content.ReadFromJsonAsync<PreActionPreview>(ct);
+                if (generation != openGeneration)
+                {
+                    return;
+                }
+
+                if (body is null)
+                {
+                    FailMalformedPreview(endpoint);
+                    return;
+                }
+
+                generatedAt = body.GeneratedAt;
+                generatedBy = body.GeneratedBy;
+                preRows = (body.Rows ?? Array.Empty<PreActionReportRow>()).ToList();
+                summaryGroups = BuildPreActionSummary(preRows);
+                rowCount = preRows.Count;
+            }
+            else
+            {
+                var body = await response.Content.ReadFromJsonAsync<PostActionPreview>(ct);
+                if (generation != openGeneration)
+                {
+                    return;
+                }
+
+                if (body is null)
+                {
+                    FailMalformedPreview(endpoint);
+                    return;
+                }
+
+                generatedAt = body.GeneratedAt;
+                generatedBy = body.GeneratedBy;
+                postRows = (body.Rows ?? Array.Empty<PostActionReportRow>()).ToList();
+                summaryGroups = BuildPostActionSummary(postRows);
+                rowCount = postRows.Count;
+            }
+
+            previewLoaded = true;
+            isLoading = false;
+            Logger.LogInformation(
+                "ReportModal: preview loaded {ReportKind}, RowCount={RowCount}, ElapsedMs={ElapsedMs}",
+                reportKind, rowCount, stopwatch.ElapsedMilliseconds);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Host component disposed (navigation or circuit end) — stop silently.
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            Logger.LogWarning(ex, "ReportModal: unable to reach Api for {Endpoint}", endpoint);
+            if (generation == openGeneration)
+            {
+                previewErrorBanner = PreviewErrorMessage;
+                isLoading = false;
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // §7 V4: a malformed 200 body renders the banner, never a crash. The exception is not
+            // logged — §11 forbids logging response bodies.
+            if (generation == openGeneration)
+            {
+                FailMalformedPreview(endpoint);
+            }
+        }
+    }
+
+    private void FailMalformedPreview(string endpoint)
+    {
+        Logger.LogWarning("ReportModal: unexpected {StatusCode} from {Endpoint}", 200, endpoint);
+        previewErrorBanner = PreviewErrorMessage;
+        isLoading = false;
+    }
+
+    // §8.4: on-demand generation via CAS-015's POST, streamed to the browser through download.js.
+    private async Task DownloadAsync(string format)
+    {
+        // §7 V1/V3: ignored unless the preview succeeded and no other download is in flight.
+        if (!DownloadsEnabled)
+        {
+            return;
+        }
+
+        var ct = disposeCts.Token;
+        var generation = openGeneration;
+        var reportKind = kind;
+        var route = KindRoute;
+        var endpoint = $"POST /{route}";
+        var formatLabel = format == PdfFormat ? "PDF" : "XLSX";
+
+        downloadInFlightFormat = format;
+        downloadErrorBanner = null;
+
+        var stopwatch = Stopwatch.StartNew();
+        var client = HttpClientFactory.CreateClient("CachetApi");
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, route)
+            {
+                Content = JsonContent.Create(new ReportGenerationRequest
+                {
+                    ActiveTabLabel = ActiveTabLabel,
+                    Format = format
+                })
+            };
+
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Logger.LogWarning("ReportModal: unexpected {StatusCode} from {Endpoint}", (int)response.StatusCode, endpoint);
+                if (generation == openGeneration)
+                {
+                    if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                    {
+                        sessionExpired = true;
+                    }
+                    else if (response.StatusCode == System.Net.HttpStatusCode.InternalServerError)
+                    {
+                        downloadErrorBanner = GenerationFailedMessage;
+                    }
+                    else
+                    {
+                        downloadErrorBanner = DownloadFailedMessage(formatLabel);
+                    }
+                }
+
+                return;
+            }
+
+            // §7 V5: only the expected type for the requested format is ever passed to the browser.
+            var expectedContentType = format == PdfFormat ? PdfContentType : XlsxContentType;
+            if (!string.Equals(response.Content.Headers.ContentType?.MediaType, expectedContentType, StringComparison.OrdinalIgnoreCase))
+            {
+                Logger.LogWarning("ReportModal: unexpected {StatusCode} from {Endpoint}", (int)response.StatusCode, endpoint);
+                if (generation == openGeneration)
+                {
+                    downloadErrorBanner = DownloadFailedMessage(formatLabel);
+                }
+
+                return;
+            }
+
+            // §8.4 step 4: server filename (never logged, §11), with a fixed fallback.
+            var disposition = response.Content.Headers.ContentDisposition;
+            var fileName = (disposition?.FileNameStar ?? disposition?.FileName)?.Trim('"');
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                fileName = $"{(reportKind == ReportKind.PreAction ? "pre" : "post")}-action-report.{format}";
+            }
+
+            var bytes = response.Content.Headers.ContentLength;
+
+            // SC-10: the bytes pass straight from the response stream to the browser — no file,
+            // temp file or cache on the Web server.
+            var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var streamRef = new DotNetStreamReference(stream, leaveOpen: false);
+            await JS.InvokeVoidAsync("cachetDownload.fromStream", ct, fileName, streamRef);
+
+            Logger.LogInformation(
+                "ReportModal: download delivered {ReportKind} {Format}, Bytes={Bytes}, ElapsedMs={ElapsedMs}",
+                reportKind, format, bytes, stopwatch.ElapsedMilliseconds);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Host component disposed — the request is abandoned and no file is delivered (§8.4 step 7).
+        }
+        catch (JSDisconnectedException)
+        {
+            // Circuit gone — nothing left to render into.
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+        {
+            Logger.LogWarning(ex, "ReportModal: unable to reach Api for {Endpoint}", endpoint);
+            if (generation == openGeneration)
+            {
+                downloadErrorBanner = DownloadFailedMessage(formatLabel);
+            }
+        }
+        catch (JSException)
+        {
+            // §8.5: JS interop failure — scoped download banner. The exception is not logged (§11
+            // lists no such line, and its message could echo the filename).
+            if (generation == openGeneration)
+            {
+                downloadErrorBanner = DownloadFailedMessage(formatLabel);
+            }
+        }
+        finally
+        {
+            // §8.4 step 6: the button returns to its normal state; the table is not refreshed.
+            downloadInFlightFormat = null;
+        }
+    }
+
+    private static string DownloadFailedMessage(string formatLabel) =>
+        $"The {formatLabel} download failed. Please try again.";
+
+    // §8.2: Pre-Action summary — count per panel (the three fixed panels), then per status.
+    private static List<(string Label, int Count)> BuildPreActionSummary(List<PreActionReportRow> rows)
+    {
+        var groups = new List<(string Label, int Count)>();
+        foreach (var panel in new[] { "Filename Matches", "Content Matches", "Quarantine" })
+        {
+            groups.Add((panel, rows.Count(r => string.Equals(r.Panel, panel, StringComparison.Ordinal))));
+        }
+
+        groups.AddRange(rows.GroupBy(r => r.Status, StringComparer.Ordinal).Select(g => (g.Key, g.Count())));
+        return groups;
+    }
+
+    // §8.2: Post-Action summary — count per actionTaken, then per result (Success / Failure).
+    private static List<(string Label, int Count)> BuildPostActionSummary(List<PostActionReportRow> rows)
+    {
+        var groups = rows.GroupBy(r => r.ActionTaken, StringComparer.Ordinal).Select(g => (g.Key, g.Count())).ToList();
+        foreach (var result in new[] { "Success", "Failure" })
+        {
+            groups.Add((result, rows.Count(r => string.Equals(r.Result, result, StringComparison.Ordinal))));
+        }
+
+        return groups;
+    }
+
+    // §8.2: UTC, matching the server's "u" format in the rendered file (PostActionReportService).
+    private static string FormatUtc(DateTimeOffset value) =>
+        value.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture);
+
+    // Mirrors KeywordSearch.razor's / QuarantineQueueModal.razor's ChipClass helper — the third local
+    // copy, deliberately not extracted here (§4, §15 item 5 follow-up).
+    private static string ChipClass(string? status) => status switch
+    {
+        "Flagged" => "cachet-chip cachet-chip-flagged cachet-report-chip",
+        "Needs Review" => "cachet-chip cachet-chip-needs-review cachet-report-chip",
+        "Informational" => "cachet-chip cachet-chip-informational cachet-report-chip",
+        "Quarantined" => "cachet-chip cachet-chip-needs-review cachet-report-chip",
+        _ => "cachet-chip cachet-chip-neutral cachet-report-chip"
+    };
+
+    public void Dispose()
+    {
+        disposeCts.Cancel();
+        disposeCts.Dispose();
+    }
+}
